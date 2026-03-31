@@ -7,3 +7,4 @@
 export { Logger, type LogLevel } from './Logger.js'
 export { type LogChannel, type LogEntry, type LogConfig } from './types.js'
 export { ConsoleChannel } from './channels/ConsoleChannel.js'
+export { createRustLogBridge, parseRustLog } from './RustLogBridge.js'
