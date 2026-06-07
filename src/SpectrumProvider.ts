@@ -1,6 +1,6 @@
 import { ConsoleChannel } from "./channels/ConsoleChannel.js";
 import { Logger } from "./Logger.js";
-import { _setLogger } from "./services/main.js";
+import { setLogger } from "./services/main.js";
 import type { LogLevel } from "./types.js";
 import { LOG_LEVEL_ORDER } from "./types.js";
 
@@ -47,6 +47,6 @@ export default class SpectrumProvider {
 	}
 
 	async boot() {
-		_setLogger(this.app.container.resolve<Logger>(Logger));
+		setLogger(this.app.container.resolve<Logger>(Logger));
 	}
 }
