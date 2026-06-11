@@ -1,7 +1,7 @@
 import { ConsoleChannel } from "./channels/ConsoleChannel.js";
 import { Logger } from "./Logger.js";
 import { setLogger } from "./services/main.js";
-import type { LogLevel } from "./types.js";
+import type { LogChannel, LogConfig, LogLevel } from "./types.js";
 import { LOG_LEVEL_ORDER } from "./types.js";
 
 const VALID_LEVELS = new Set<string>(Object.keys(LOG_LEVEL_ORDER));
@@ -9,6 +9,11 @@ const VALID_LEVELS = new Set<string>(Object.keys(LOG_LEVEL_ORDER));
 function resolveLogLevel(raw: string | undefined): LogLevel {
 	if (raw && VALID_LEVELS.has(raw)) return raw as LogLevel;
 	return "info";
+}
+
+/** A channel that owns a resource (e.g. a FileChannel WriteStream) to release on shutdown. */
+function hasClose(ch: LogChannel): ch is LogChannel & { close(): void } {
+	return "close" in ch && typeof ch.close === "function";
 }
 
 interface SpectrumContainer {
@@ -26,21 +31,26 @@ export interface SpectrumAppContext {
 }
 
 export default class SpectrumProvider {
+	#channels: LogChannel[] = [];
+
 	constructor(protected app: SpectrumAppContext) {}
 
 	register() {
-		this.app.container.singleton(Logger, () => {
-			const config = this.app.config.get<{ level?: LogLevel }>("logger");
-			const level =
-				config?.level && VALID_LEVELS.has(config.level)
-					? config.level
-					: resolveLogLevel(process.env.LOG_LEVEL);
-			return new Logger({
-				level,
-				channels: [new ConsoleChannel("pretty")],
-			});
-		});
+		const config = this.app.config.get<Partial<LogConfig>>("logger");
+		const level =
+			config?.level && VALID_LEVELS.has(config.level)
+				? config.level
+				: resolveLogLevel(process.env.LOG_LEVEL);
+		// Honour the configured channels (the whole point of LogConfig.channels);
+		// fall back to a pretty console channel only when none are supplied.
+		// Previously this was hardcoded and config.channels was silently ignored.
+		this.#channels =
+			config?.channels && config.channels.length > 0
+				? config.channels
+				: [new ConsoleChannel("pretty")];
+		const channels = this.#channels;
 
+		this.app.container.singleton(Logger, () => new Logger({ level, channels }));
 		this.app.container.singleton("logger", () => {
 			return this.app.container.resolve<Logger>(Logger);
 		});
@@ -48,5 +58,12 @@ export default class SpectrumProvider {
 
 	async boot() {
 		setLogger(this.app.container.resolve<Logger>(Logger));
+	}
+
+	/** Release channel resources (e.g. FileChannel WriteStreams) on shutdown. */
+	async shutdown() {
+		for (const channel of this.#channels) {
+			if (hasClose(channel)) channel.close();
+		}
 	}
 }

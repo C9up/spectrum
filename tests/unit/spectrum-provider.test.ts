@@ -72,4 +72,36 @@ describe("spectrum > SpectrumProvider", () => {
 		new SpectrumProvider(app).register();
 		expect(app.container.resolve(Logger)).toBeInstanceOf(Logger);
 	});
+
+	it("honours config.channels instead of hardcoding ConsoleChannel", () => {
+		const written: unknown[] = [];
+		const custom = {
+			name: "custom",
+			write(entry: unknown) {
+				written.push(entry);
+			},
+		};
+		const { app } = makeApp({ level: "info", channels: [custom] });
+		new SpectrumProvider(app).register();
+		const logger = app.container.resolve<Logger>(Logger);
+		logger.info("hello");
+		// The configured channel received the entry — proof it's wired, not ignored.
+		expect(written.length).toBe(1);
+	});
+
+	it("closes channels owning a resource on shutdown()", async () => {
+		let closed = false;
+		const fileLike = {
+			name: "file",
+			write() {},
+			close() {
+				closed = true;
+			},
+		};
+		const { app } = makeApp({ level: "info", channels: [fileLike] });
+		const provider = new SpectrumProvider(app);
+		provider.register();
+		await provider.shutdown();
+		expect(closed).toBe(true);
+	});
 });
