@@ -1,8 +1,18 @@
 import { afterEach, describe, expect, it } from "vitest";
+import type { LogChannel, LogEntry } from "../../src/index.js";
 import { Logger } from "../../src/Logger.js";
 import SpectrumProvider, {
 	type SpectrumAppContext,
 } from "../../src/SpectrumProvider.js";
+
+/** In-memory channel for asserting what the provider-built Logger emits. */
+class TestChannel implements LogChannel {
+	name = "test";
+	entries: LogEntry[] = [];
+	write(entry: LogEntry): void {
+		this.entries.push(entry);
+	}
+}
 
 function makeApp(loggerConfig?: unknown): {
 	app: SpectrumAppContext;
@@ -71,6 +81,26 @@ describe("spectrum > SpectrumProvider", () => {
 		const { app } = makeApp();
 		new SpectrumProvider(app).register();
 		expect(app.container.resolve(Logger)).toBeInstanceOf(Logger);
+	});
+
+	// Audit 2026-06-13: the provider dropped config.modules, so per-module level
+	// overrides were silently dead. Forwarded now — a module override must apply.
+	it("forwards config.modules so per-module levels work via the provider", () => {
+		const channel = new TestChannel();
+		const { app } = makeApp({
+			level: "error",
+			channels: [channel],
+			modules: { "bus:rust": "warn" },
+		});
+		new SpectrumProvider(app).register();
+		const busLogger = app.container
+			.resolve<Logger>(Logger)
+			.child({ module: "bus:rust" });
+		busLogger.info("dropped — below the base error level");
+		busLogger.warn("appears — the module override lowers bus:rust to warn");
+		// Pre-fix: modules dropped → bus:rust used base 'error' → warn suppressed → 0.
+		expect(channel.entries).toHaveLength(1);
+		expect(channel.entries[0].level).toBe("warn");
 	});
 
 	it("honours config.channels instead of hardcoding ConsoleChannel", () => {

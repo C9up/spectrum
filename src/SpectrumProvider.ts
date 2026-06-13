@@ -50,7 +50,14 @@ export default class SpectrumProvider {
 				: [new ConsoleChannel("pretty")];
 		const channels = this.#channels;
 
-		this.app.container.singleton(Logger, () => new Logger({ level, channels }));
+		// Forward per-module level overrides (config.logger.modules) — Logger.log
+		// gates each module's level off config.modules?.[module]; dropping it here
+		// silently disables every per-module override in production.
+		const modules = config?.modules;
+		this.app.container.singleton(
+			Logger,
+			() => new Logger({ level, channels, modules }),
+		);
 		this.app.container.singleton("logger", () => {
 			return this.app.container.resolve<Logger>(Logger);
 		});
