@@ -31,6 +31,20 @@ describe("FakeLogger — LogChannel surface", () => {
 		expect(log.getLogged()[0].data?.userId).toBe(1);
 	});
 
+	it("captures an entry whose data carries a non-cloneable value (no drop)", () => {
+		// structuredClone throws DataCloneError on functions/class instances;
+		// that throw used to propagate into Logger.log's swallow-to-stderr, so
+		// the entry was never captured and assertLogged failed misleadingly
+		// (audit 2026-06-13). The fallback must still capture the entry.
+		const log = new FakeLogger();
+		log.write(makeEntry({ message: "with-fn", data: { cb: () => 1, n: 7 } }));
+		const logged = log.getLogged();
+		expect(logged).toHaveLength(1);
+		expect(logged[0].message).toBe("with-fn");
+		// The non-cloneable bits degrade gracefully; cloneable data survives.
+		expect(logged[0].data?.n).toBe(7);
+	});
+
 	it("reset clears the captured array", () => {
 		const log = new FakeLogger();
 		log.write(makeEntry());

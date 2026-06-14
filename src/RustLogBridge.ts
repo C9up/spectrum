@@ -89,14 +89,24 @@ export function createRustLogBridge(channels: LogChannel[]): {
 				const str =
 					typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
 				let hadRustLog = false;
-				const passthroughLines: string[] = [];
-
-				// Try to parse as Rust log — if it matches, route to channels
-				for (const line of str.split("\n")) {
-					const trimmed = line.trim();
-					if (!trimmed) continue;
-
-					const entry = parseRustLog(trimmed);
+				// Rebuild passthrough as one byte-faithful string instead of
+				// re-emitting each line with an appended "\n". split("\n") drops
+				// the separator, so every segment except a trailing fragment (the
+				// chunk didn't end in "\n") was newline-terminated originally —
+				// reattach accordingly. This preserves blank lines and a partial
+				// no-newline trailing write verbatim, and keeps passthrough lines
+				// in their original order.
+				let passthrough = "";
+				const segments = str.split("\n");
+				for (let i = 0; i < segments.length; i++) {
+					const seg = segments[i] ?? "";
+					const isTrailingFragment = i === segments.length - 1;
+					const original = isTrailingFragment ? seg : `${seg}\n`;
+					const trimmed = seg.trim();
+					// Only a complete, non-empty line is a Rust-log candidate. A
+					// trailing fragment is a partial write — never parse or drop it.
+					const entry =
+						trimmed && !isTrailingFragment ? parseRustLog(trimmed) : null;
 					if (entry) {
 						hadRustLog = true;
 						for (const channel of channels) {
@@ -110,7 +120,7 @@ export function createRustLogBridge(channels: LogChannel[]): {
 							}
 						}
 					} else {
-						passthroughLines.push(line);
+						passthrough += original;
 					}
 				}
 
@@ -119,8 +129,8 @@ export function createRustLogBridge(channels: LogChannel[]): {
 					return origWrite(chunk as never, ...(args as []));
 				}
 
-				for (const line of passthroughLines) {
-					origWrite(`${line}\n`);
+				if (passthrough) {
+					origWrite(passthrough);
 				}
 
 				return true;

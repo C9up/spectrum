@@ -54,6 +54,17 @@ export class FileChannel implements LogChannel {
 				);
 				return;
 			}
+			// A prior failed rotation strands buffered lines while #stream is
+			// null (the rotation's #flushPending early-returns on no stream).
+			// Now that we've reopened, drain them — in order, before the new
+			// line — instead of losing them until the next rotation happens to
+			// fire. #flushPending may itself trigger a rotation if a buffered
+			// line overflows, so re-check before writing the current line.
+			this.#flushPending();
+			if (this.#rotating) {
+				this.#pending.push(line);
+				return;
+			}
 		}
 
 		if (this.#currentSize + bytes > this.#maxSize) {

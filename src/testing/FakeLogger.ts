@@ -136,5 +136,19 @@ function safeStringify(value: unknown): string {
 }
 
 function deepClone<T>(value: T): T {
-	return structuredClone(value);
+	try {
+		return structuredClone(value);
+	} catch {
+		// `data` can carry functions / class instances that structuredClone
+		// rejects (DataCloneError). For a test capture a perfect clone isn't
+		// needed — round-trip through safeStringify (functions → "<function>",
+		// circular → "<circular>") so the entry is still CAPTURED and assertable
+		// instead of thrown away (the throw propagated into Logger.log's swallow,
+		// dropping the entry and making assertLogged fail with "no entry").
+		try {
+			return JSON.parse(safeStringify(value));
+		} catch {
+			return value;
+		}
+	}
 }
