@@ -44,8 +44,11 @@ export function parseRustLog(line: string): LogEntry | null {
 /**
  * Create a bridge that captures stderr and routes Rust logs to Spectrum channels.
  *
- * Usage:
- *   const bridge = createRustLogBridge(logger.config.channels)
+ * Usage — pass the same channels array you built the Logger with (Logger.config
+ * is private, so reuse the array rather than reaching into the instance):
+ *   const channels = [new ConsoleChannel('pretty')]
+ *   const logger = new Logger({ level: 'info', channels })
+ *   const bridge = createRustLogBridge(channels)
  *   bridge.start()
  *   // ... Rust crates emit to stderr
  *   bridge.stop()
