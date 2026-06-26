@@ -4,7 +4,7 @@
  *
  *   import logger from '@c9up/spectrum/services/main'
  *
- *   logger.info({ userId }, 'user logged in')
+ *   logger.info('user logged in', { userId })   // message-first; data + `err` serialized
  *
  * Populated by `SpectrumProvider.boot()`.
  */

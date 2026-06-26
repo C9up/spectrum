@@ -9,6 +9,28 @@ import { LOG_LEVEL_ORDER } from "./types.js";
 
 export type { LogLevel };
 
+/**
+ * Serialize an `err`/`error` Error in the log data into a plain `{ name, message,
+ * stack }` (AdonisJS/pino `err` serializer parity) — Errors don't JSON-stringify
+ * usefully otherwise. Other data passes through untouched. Returns a new object;
+ * the caller's data is not mutated.
+ */
+function serializeErr(
+	data?: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+	if (!data) return data;
+	for (const key of ["err", "error"]) {
+		const v = data[key];
+		if (v instanceof Error) {
+			return {
+				...data,
+				[key]: { name: v.name, message: v.message, stack: v.stack },
+			};
+		}
+	}
+	return data;
+}
+
 export class Logger {
 	private config: LogConfig;
 	private module: string;
@@ -83,7 +105,7 @@ export class Logger {
 			module: this.module,
 			correlationId: this.correlationId,
 			timestamp: new Date().toISOString(),
-			data,
+			data: serializeErr(data),
 		};
 
 		for (const channel of this.config.channels) {
