@@ -1,19 +1,44 @@
 import { ConsoleChannel } from "./channels/ConsoleChannel.js";
 import { Logger } from "./Logger.js";
+import { LoggerManager } from "./LoggerManager.js";
 import { setLogger } from "./services/main.js";
-import type { LogChannel, LogConfig, LogLevel } from "./types.js";
+import type {
+	LogChannel,
+	LogConfig,
+	LoggerManagerConfig,
+	LogLevelWithSilent,
+} from "./types.js";
 import { LOG_LEVEL_ORDER } from "./types.js";
 
-const VALID_LEVELS = new Set<string>(Object.keys(LOG_LEVEL_ORDER));
+const VALID_LEVELS = new Set<string>([
+	...Object.keys(LOG_LEVEL_ORDER),
+	"silent",
+]);
 
-function resolveLogLevel(raw: string | undefined): LogLevel {
-	if (raw && VALID_LEVELS.has(raw)) return raw as LogLevel;
-	return "info";
+function isValidLevel(raw: unknown): raw is LogLevelWithSilent {
+	return typeof raw === "string" && VALID_LEVELS.has(raw);
+}
+
+function resolveLogLevel(raw: unknown): LogLevelWithSilent {
+	return isValidLevel(raw) ? raw : "info";
 }
 
 /** A channel that owns a resource (e.g. a FileChannel WriteStream) to release on shutdown. */
 function hasClose(ch: LogChannel): ch is LogChannel & { close(): void } {
 	return "close" in ch && typeof ch.close === "function";
+}
+
+function isManagerConfig(value: unknown): value is LoggerManagerConfig {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		"loggers" in value &&
+		"default" in value
+	);
+}
+
+function isPartialLogConfig(value: unknown): value is Partial<LogConfig> {
+	return typeof value === "object" && value !== null;
 }
 
 interface SpectrumContainer {
@@ -36,28 +61,16 @@ export default class SpectrumProvider {
 	constructor(protected app: SpectrumAppContext) {}
 
 	register() {
-		const config = this.app.config.get<Partial<LogConfig>>("logger");
-		const level =
-			config?.level && VALID_LEVELS.has(config.level)
-				? config.level
-				: resolveLogLevel(process.env.LOG_LEVEL);
-		// Honour the configured channels (the whole point of LogConfig.channels);
-		// fall back to a pretty console channel only when none are supplied.
-		// Previously this was hardcoded and config.channels was silently ignored.
-		this.#channels =
-			config?.channels && config.channels.length > 0
-				? config.channels
-				: [new ConsoleChannel("pretty")];
-		const channels = this.#channels;
+		const raw = this.app.config.get<unknown>("logger");
+		const managerConfig = this.#normalize(raw);
 
-		// Forward per-module level overrides (config.logger.modules) — Logger.log
-		// gates each module's level off config.modules?.[module]; dropping it here
-		// silently disables every per-module override in production.
-		const modules = config?.modules;
-		this.app.container.singleton(
-			Logger,
-			() => new Logger({ level, channels, modules }),
+		// Collect every channel across all loggers so shutdown can release them.
+		this.#channels = Object.values(managerConfig.loggers).flatMap(
+			(logger) => logger.channels ?? [],
 		);
+
+		const manager = new LoggerManager(managerConfig);
+		this.app.container.singleton(Logger, () => manager);
 		this.app.container.singleton("logger", () => {
 			return this.app.container.resolve<Logger>(Logger);
 		});
@@ -72,5 +85,35 @@ export default class SpectrumProvider {
 		for (const channel of this.#channels) {
 			if (hasClose(channel)) channel.close();
 		}
+	}
+
+	/**
+	 * Normalize the raw `logger` config into a multi-logger config, filling in
+	 * env-based level fallback and a default console channel. Accepts the Adonis
+	 * multi-logger shape or the legacy flat shape (or nothing).
+	 */
+	#normalize(raw: unknown): LoggerManagerConfig {
+		if (isManagerConfig(raw)) {
+			const loggers: Record<string, LogConfig> = {};
+			for (const [name, cfg] of Object.entries(raw.loggers)) {
+				loggers[name] = this.#normalizeLogger(cfg);
+			}
+			return { default: raw.default, loggers };
+		}
+		const flat = isPartialLogConfig(raw) ? raw : {};
+		return { default: "app", loggers: { app: this.#normalizeLogger(flat) } };
+	}
+
+	#normalizeLogger(cfg: Partial<LogConfig>): LogConfig {
+		// Honour the configured channels; fall back to a pretty console channel
+		// only when none are supplied.
+		const channels =
+			cfg.channels && cfg.channels.length > 0
+				? cfg.channels
+				: [new ConsoleChannel("pretty")];
+		const level = isValidLevel(cfg.level)
+			? cfg.level
+			: resolveLogLevel(process.env.LOG_LEVEL);
+		return { ...cfg, level, channels };
 	}
 }

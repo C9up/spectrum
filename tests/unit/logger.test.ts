@@ -60,9 +60,12 @@ describe("logger > log levels", () => {
 		expect(channel.entries[0].timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 	});
 
-	it("includes optional data", () => {
+	it("merges a message-first data object at the entry root (pino parity)", () => {
 		logger.info("order", { orderId: "123", amount: 42 });
-		expect(channel.entries[0].data).toEqual({ orderId: "123", amount: 42 });
+		expect(channel.entries[0].orderId).toBe("123");
+		expect(channel.entries[0].amount).toBe(42);
+		// The message-first structured form does not nest under `data`.
+		expect(channel.entries[0].data).toBeUndefined();
 	});
 });
 

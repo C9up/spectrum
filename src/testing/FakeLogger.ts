@@ -9,6 +9,7 @@
  */
 
 import type { LogChannel, LogEntry, LogLevel } from "../types.js";
+import { logEntryExtras } from "../types.js";
 
 export interface FakeLoggerPredicate {
 	/** Substring match against `entry.message`. */
@@ -26,21 +27,15 @@ export class FakeLogger implements LogChannel {
 	#captured: LogEntry[] = [];
 
 	write(entry: LogEntry): void {
-		// Deep-clone via `structuredClone` so nested objects in `data`
-		// are isolated — a shallow `{ ...entry.data }` would leak
-		// mutations of nested fields back into the captured entry.
-		this.#captured.push({
-			...entry,
-			data: entry.data ? deepClone(entry.data) : undefined,
-		});
+		// Deep-clone the whole entry so nested objects in `data` OR in the
+		// merged root fields are isolated — a shallow copy would leak mutations
+		// of nested fields back into the captured entry.
+		this.#captured.push(deepClone(entry));
 	}
 
 	/** Defensive snapshot of every captured entry. */
 	getLogged(): LogEntry[] {
-		return this.#captured.map((e) => ({
-			...e,
-			data: e.data ? deepClone(e.data) : undefined,
-		}));
+		return this.#captured.map((e) => deepClone(e));
 	}
 
 	reset(): void {
@@ -90,7 +85,10 @@ function makeMatcher(
 		) {
 			return false;
 		}
-		if (predicate.dataMatches && !predicate.dataMatches(e.data)) {
+		// New-style logs merge structured fields at the entry root; fall back to
+		// those when the legacy `data` bag is absent so `dataMatches` still works.
+		const bag = e.data ?? logEntryExtras(e);
+		if (predicate.dataMatches && !predicate.dataMatches(bag)) {
 			return false;
 		}
 		return true;

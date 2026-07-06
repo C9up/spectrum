@@ -5,6 +5,7 @@
  */
 
 import type { LogChannel, LogEntry } from "../types.js";
+import { logEntryExtras } from "../types.js";
 
 export class ConsoleChannel implements LogChannel {
 	name = "console";
@@ -23,7 +24,8 @@ export class ConsoleChannel implements LogChannel {
 	}
 
 	#writeJson(entry: LogEntry): void {
-		// Data nested under 'data' key — no spread to prevent key collisions
+		// Structural fields first, then merged root fields spread flat (pino
+		// output parity). Legacy `data` (if present) stays under its own key.
 		const output = JSON.stringify({
 			timestamp: entry.timestamp,
 			level: entry.level,
@@ -31,6 +33,7 @@ export class ConsoleChannel implements LogChannel {
 			message: entry.message,
 			correlationId: entry.correlationId,
 			data: entry.data,
+			...logEntryExtras(entry),
 		});
 		this.#writeToStream(entry.level, `${output}\n`);
 	}
@@ -60,7 +63,12 @@ export class ConsoleChannel implements LogChannel {
 				: entry.correlationId
 			: "";
 		const cid = cidRaw ? ` cid=${this.#sanitize(cidRaw)}` : "";
-		const dataStr = entry.data ? ` ${JSON.stringify(entry.data)}` : "";
+		// Prefer legacy `data`; otherwise render the merged root fields. JSON
+		// encoding escapes control chars, so no CRLF can leak into the line.
+		const extras = logEntryExtras(entry);
+		const payload =
+			entry.data ?? (Object.keys(extras).length > 0 ? extras : undefined);
+		const dataStr = payload ? ` ${JSON.stringify(payload)}` : "";
 		const message = this.#sanitize(entry.message);
 		const module = this.#sanitize(entry.module);
 
