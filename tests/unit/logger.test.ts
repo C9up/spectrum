@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LogChannel, LogEntry } from "../../src/index.js";
 import {
 	ConsoleChannel,
@@ -182,6 +182,40 @@ describe("logger > RustLogBridge", () => {
 
 			expect(writes).toBe(1);
 			expect(passthrough.length).toBeGreaterThan(0);
+		} finally {
+			process.stderr.write = originalWrite;
+		}
+	});
+});
+
+describe("logger > channel-failure fallback sanitization", () => {
+	it("escapes CR/LF in the channel name, message, and error (no log-forging)", () => {
+		const originalWrite = process.stderr.write;
+		const captured: string[] = [];
+		process.stderr.write = ((chunk: string | Uint8Array) => {
+			captured.push(
+				typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk),
+			);
+			return true;
+		}) as typeof process.stderr.write;
+
+		try {
+			const channel: LogChannel = {
+				name: "evil\ninjected",
+				write() {
+					throw new Error("boom\nforged");
+				},
+			};
+			const logger = new Logger({ level: "info", channels: [channel] });
+			logger.info("msg\nwith-newline");
+
+			const out = captured.join("");
+			expect(out).toContain("evil\\ninjected"); // channel name escaped
+			expect(out).toContain("msg\\nwith-newline"); // message escaped
+			expect(out).toContain("boom\\nforged"); // error escaped
+			// Only the trailing line terminator is a real newline — nothing inside
+			// the payload forged another line.
+			expect(out.replace(/\n$/, "")).not.toContain("\n");
 		} finally {
 			process.stderr.write = originalWrite;
 		}

@@ -4,6 +4,7 @@
  * @implements FR57, FR58
  */
 
+import { sanitizeLogValue } from "../sanitize.js";
 import type { LogChannel, LogEntry } from "../types.js";
 import { logEntryExtras } from "../types.js";
 
@@ -39,14 +40,7 @@ export class ConsoleChannel implements LogChannel {
 	}
 
 	#sanitize(str: string): string {
-		// Strip ANSI escape sequences. ESC (0x1B) is a control char so we match
-		// it via String.fromCharCode rather than a /\x1b/ regex (Biome's
-		// noControlCharactersInRegex rule rightly flags the literal form).
-		const ESC = String.fromCharCode(0x1b);
-		return str
-			.replace(/\r/g, "\\r")
-			.replace(/\n/g, "\\n")
-			.replaceAll(ESC, "[ESC]");
+		return sanitizeLogValue(str);
 	}
 
 	#writePretty(entry: LogEntry): void {

@@ -14,6 +14,7 @@
  */
 
 import { format } from "node:util";
+import { sanitizeLogValue } from "./sanitize.js";
 import type {
 	LogConfig,
 	LogEntry,
@@ -335,8 +336,13 @@ export class Logger {
 			try {
 				channel.write(entry);
 			} catch (err) {
+				// Sanitize every interpolated value — a channel name / message /
+				// error carrying CR/LF or ANSI escapes could otherwise forge log
+				// lines here (the fallback bypasses the channel's own sanitizer).
 				process.stderr.write(
-					`[Spectrum] Channel '${channel.name}' failed for: ${message} — ${String(err)}\n`,
+					`[Spectrum] Channel '${sanitizeLogValue(channel.name)}' failed for: ${sanitizeLogValue(
+						message,
+					)} — ${sanitizeLogValue(String(err))}\n`,
 				);
 			}
 		}

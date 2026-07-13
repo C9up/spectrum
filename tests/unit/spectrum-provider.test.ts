@@ -62,6 +62,18 @@ describe("spectrum > SpectrumProvider", () => {
 		expect(byToken).toBe(byClass);
 	});
 
+	it("throws a clear error when `default` references a missing logger (not a crash at first log)", () => {
+		const { app } = makeApp({
+			default: "prod",
+			loggers: { app: { level: "info", channels: [new TestChannel()] } },
+		});
+		const provider = new SpectrumProvider(app);
+		expect(() => {
+			provider.register();
+			app.container.resolve(Logger); // force the lazy manager build
+		}).toThrow(/Missing "loggers\.prod"/);
+	});
+
 	it("uses the configured log level when present and valid", () => {
 		const { app } = makeApp({ level: "debug" });
 		new SpectrumProvider(app).register();

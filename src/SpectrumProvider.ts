@@ -98,6 +98,14 @@ export default class SpectrumProvider {
 			for (const [name, cfg] of Object.entries(raw.loggers)) {
 				loggers[name] = this.#normalizeLogger(cfg);
 			}
+			// Fail loud at boot if `default` references a missing logger — else
+			// LoggerManager builds with `loggers[default] === undefined` and crashes
+			// with a cryptic TypeError on the first log. Mirrors defineConfig().
+			if (!loggers[raw.default]) {
+				throw new Error(
+					`[spectrum] Missing "loggers.${raw.default}". It is referenced by the "default" logger`,
+				);
+			}
 			return { default: raw.default, loggers };
 		}
 		const flat = isPartialLogConfig(raw) ? raw : {};
