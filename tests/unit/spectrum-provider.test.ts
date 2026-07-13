@@ -25,11 +25,11 @@ function makeApp(loggerConfig?: unknown): {
 				singleton(token, factory) {
 					bindings.set(token, factory);
 				},
-				resolve<T = unknown>(token: unknown): T {
+				async resolve<T = unknown>(token: unknown): Promise<T> {
 					if (cache.has(token)) return cache.get(token) as T;
 					const factory = bindings.get(token);
 					if (!factory) throw new Error("not registered");
-					const value = factory();
+					const value = await factory();
 					cache.set(token, value);
 					return value as T;
 				},
@@ -52,12 +52,12 @@ describe("spectrum > SpectrumProvider", () => {
 		else process.env.LOG_LEVEL = originalLevel;
 	});
 
-	it("registers Logger and 'logger' string token to the same singleton", () => {
+	it("registers Logger and 'logger' string token to the same singleton", async () => {
 		const { app } = makeApp();
 		new SpectrumProvider(app).register();
 
-		const byClass = app.container.resolve(Logger);
-		const byToken = app.container.resolve("logger");
+		const byClass = await app.container.resolve(Logger);
+		const byToken = await app.container.resolve("logger");
 		expect(byClass).toBeInstanceOf(Logger);
 		expect(byToken).toBe(byClass);
 	});
@@ -68,36 +68,33 @@ describe("spectrum > SpectrumProvider", () => {
 			loggers: { app: { level: "info", channels: [new TestChannel()] } },
 		});
 		const provider = new SpectrumProvider(app);
-		expect(() => {
-			provider.register();
-			app.container.resolve(Logger); // force the lazy manager build
-		}).toThrow(/Missing "loggers\.prod"/);
+		expect(() => provider.register()).toThrow(/Missing "loggers\.prod"/);
 	});
 
-	it("uses the configured log level when present and valid", () => {
+	it("uses the configured log level when present and valid", async () => {
 		const { app } = makeApp({ level: "debug" });
 		new SpectrumProvider(app).register();
-		const logger = app.container.resolve(Logger);
+		const logger = await app.container.resolve(Logger);
 		expect(logger).toBeInstanceOf(Logger);
 	});
 
-	it("falls back to LOG_LEVEL env var when config.level is invalid", () => {
+	it("falls back to LOG_LEVEL env var when config.level is invalid", async () => {
 		process.env.LOG_LEVEL = "warn";
 		const { app } = makeApp({ level: "bogus-level" });
 		new SpectrumProvider(app).register();
-		expect(app.container.resolve(Logger)).toBeInstanceOf(Logger);
+		expect(await app.container.resolve(Logger)).toBeInstanceOf(Logger);
 	});
 
-	it("falls back to 'info' when neither config.level nor LOG_LEVEL is valid", () => {
+	it("falls back to 'info' when neither config.level nor LOG_LEVEL is valid", async () => {
 		delete process.env.LOG_LEVEL;
 		const { app } = makeApp();
 		new SpectrumProvider(app).register();
-		expect(app.container.resolve(Logger)).toBeInstanceOf(Logger);
+		expect(await app.container.resolve(Logger)).toBeInstanceOf(Logger);
 	});
 
 	// Audit 2026-06-13: the provider dropped config.modules, so per-module level
 	// overrides were silently dead. Forwarded now — a module override must apply.
-	it("forwards config.modules so per-module levels work via the provider", () => {
+	it("forwards config.modules so per-module levels work via the provider", async () => {
 		const channel = new TestChannel();
 		const { app } = makeApp({
 			level: "error",
@@ -105,9 +102,9 @@ describe("spectrum > SpectrumProvider", () => {
 			modules: { "bus:rust": "warn" },
 		});
 		new SpectrumProvider(app).register();
-		const busLogger = app.container
-			.resolve<Logger>(Logger)
-			.child({ module: "bus:rust" });
+		const busLogger = (await app.container.resolve<Logger>(Logger)).child({
+			module: "bus:rust",
+		});
 		busLogger.info("dropped — below the base error level");
 		busLogger.warn("appears — the module override lowers bus:rust to warn");
 		// Pre-fix: modules dropped → bus:rust used base 'error' → warn suppressed → 0.
@@ -115,7 +112,7 @@ describe("spectrum > SpectrumProvider", () => {
 		expect(channel.entries[0].level).toBe("warn");
 	});
 
-	it("honours config.channels instead of hardcoding ConsoleChannel", () => {
+	it("honours config.channels instead of hardcoding ConsoleChannel", async () => {
 		const written: unknown[] = [];
 		const custom = {
 			name: "custom",
@@ -125,7 +122,7 @@ describe("spectrum > SpectrumProvider", () => {
 		};
 		const { app } = makeApp({ level: "info", channels: [custom] });
 		new SpectrumProvider(app).register();
-		const logger = app.container.resolve<Logger>(Logger);
+		const logger = await app.container.resolve<Logger>(Logger);
 		logger.info("hello");
 		// The configured channel received the entry — proof it's wired, not ignored.
 		expect(written.length).toBe(1);

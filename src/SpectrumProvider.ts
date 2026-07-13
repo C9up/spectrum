@@ -43,7 +43,7 @@ function isPartialLogConfig(value: unknown): value is Partial<LogConfig> {
 
 interface SpectrumContainer {
 	singleton(token: unknown, factory: () => unknown): void;
-	resolve<T = unknown>(token: unknown): T;
+	resolve<T = unknown>(token: unknown): Promise<T>;
 }
 
 interface SpectrumConfigStore {
@@ -77,7 +77,7 @@ export default class SpectrumProvider {
 	}
 
 	async boot() {
-		setLogger(this.app.container.resolve<Logger>(Logger));
+		setLogger(await this.app.container.resolve<Logger>(Logger));
 	}
 
 	/** Release channel resources (e.g. FileChannel WriteStreams) on shutdown. */
