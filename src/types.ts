@@ -1,3 +1,4 @@
+import type { TransportTargetOptions } from "./targets.js";
 /**
  * Spectrum types.
  * @implements FR54, FR57
@@ -44,6 +45,8 @@ export interface LogEntry {
 	[key: string]: unknown;
 }
 
+export type { TransportTargetOptions } from "./targets.js";
+
 export interface LogChannel {
 	name: string;
 	write(entry: LogEntry): void;
@@ -70,6 +73,13 @@ export interface LogConfig {
 	level?: LogLevelWithSilent;
 	/** Output channels — spectrum divergence from pino transports/destination. */
 	channels?: LogChannel[];
+	/**
+	 * Transport targets, as an AdonisJS `config/logger.ts` declares them. They
+	 * are converted to {@link LogChannel}s at construction, so a migrated config
+	 * drives real output instead of being quietly ignored. Explicit `channels`
+	 * win when both are given.
+	 */
+	transport?: { targets?: readonly TransportTargetOptions[] };
 	/** Per-module level overrides — spectrum divergence. */
 	modules?: Record<string, LogLevelWithSilent>;
 	/** Keys / dot-paths to redact on the merging object before writing. */

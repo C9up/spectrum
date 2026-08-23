@@ -15,6 +15,7 @@
 
 import { format } from "node:util";
 import { sanitizeLogValue } from "./sanitize.js";
+import { channelsFromTargets } from "./targets.js";
 import type {
 	LogConfig,
 	LogEntry,
@@ -96,7 +97,14 @@ export class Logger {
 		correlationId?: string,
 		bindings: Record<string, unknown> = {},
 	) {
-		this.#config = config;
+		// A migrated config declares `transport.targets`; spectrum writes through
+		// channels. Convert once here so every read path downstream sees only
+		// channels — an explicit `channels` list wins, since it is the more
+		// specific statement of intent.
+		this.#config =
+			config.channels === undefined && config.transport?.targets !== undefined
+				? { ...config, channels: channelsFromTargets(config.transport.targets) }
+				: config;
 		this.#module = module;
 		this.#correlationId = correlationId;
 		this.#bindings = bindings;

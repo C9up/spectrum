@@ -11,6 +11,12 @@ export { configure } from "./configure.js";
 export { Logger, type LogLevel } from "./Logger.js";
 export { LoggerManager } from "./LoggerManager.js";
 export { createRustLogBridge, parseRustLog } from "./RustLogBridge.js";
+export type {
+	FileTargetOptions,
+	PrettyTargetOptions,
+	TransportTargetOptions,
+} from "./targets.js";
+export { channelsFromTargets, Targets, targets } from "./targets.js";
 export {
 	type LogChannel,
 	type LogConfig,
