@@ -1,6 +1,6 @@
 {
   "name": "@c9up/spectrum",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "Spectrum — structured logging for the Ream framework",
   "license": "MIT",
   "type": "module",
@@ -38,7 +38,7 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@c9up/ream": "^0.1.0"
+    "@c9up/ream": "^0.2.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.10",
