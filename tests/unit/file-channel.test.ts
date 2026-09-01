@@ -122,7 +122,7 @@ describe("spectrum > close() is terminal", () => {
 	it("flushes what a rotation had buffered rather than dropping it", async () => {
 		// Small enough that the second line triggers a rotation and lands in the
 		// pending buffer.
-		const ch = new FileChannel({ path: logPath, maxSize: 120 });
+		const ch = new FileChannel({ path: logPath, maxSizeBytes: 120 });
 		ch.write(makeEntry({ msg: "x".repeat(100) }));
 		ch.write(makeEntry({ msg: "buffered-line" }));
 		ch.close();
@@ -145,5 +145,62 @@ describe("spectrum > close() is terminal", () => {
 			ch.close();
 			ch.close();
 		}).not.toThrow();
+	});
+});
+
+describe("spectrum > FileChannel close during rotation", () => {
+	let dir: string;
+	let logPath: string;
+
+	beforeEach(async () => {
+		dir = await fsp.mkdtemp(path.join(os.tmpdir(), "spectrum-close-"));
+		logPath = path.join(dir, "app.log");
+	});
+
+	afterEach(async () => {
+		await flush(80);
+		await fsp.rm(dir, { recursive: true, force: true });
+	});
+
+	it("keeps lines it accepted when close() lands mid-rotation", async () => {
+		// A rotation nulls #stream before awaiting the old stream's end, and
+		// close() used to splice #pending and then find no stream to write it
+		// to — so lines the channel had already accepted vanished.
+		const channel = new FileChannel({
+			path: logPath,
+			maxSizeBytes: 200,
+			maxFiles: 3,
+		});
+
+		// Overflow to schedule a rotation, then buffer a line behind it.
+		channel.write(makeEntry({ message: "x".repeat(300) }));
+		channel.write(makeEntry({ message: "MARKER" }));
+
+		// close() inside the rotation window: the microtask has run, the stream
+		// is nulled, and the new one is not open yet.
+		await new Promise<void>((resolve) => queueMicrotask(() => resolve()));
+		channel.close();
+		await flush(80);
+
+		const files = (await fsp.readdir(dir)).sort();
+		const contents = files
+			.map((f) => fs.readFileSync(path.join(dir, f), "utf8"))
+			.join("");
+		expect(contents, `files: ${files.join(", ")}`).toContain("MARKER");
+	});
+
+	it("stays closed — a rotation in flight does not bring the file back", async () => {
+		const channel = new FileChannel({ path: logPath, maxSizeBytes: 200 });
+		channel.write(makeEntry({ message: "y".repeat(300) }));
+		await new Promise<void>((resolve) => queueMicrotask(() => resolve()));
+		channel.close();
+		await flush(80);
+
+		channel.write(makeEntry({ message: "AFTER-CLOSE" }));
+		await flush(40);
+		const contents = (await fsp.readdir(dir))
+			.map((f) => fs.readFileSync(path.join(dir, f), "utf8"))
+			.join("");
+		expect(contents).not.toContain("AFTER-CLOSE");
 	});
 });

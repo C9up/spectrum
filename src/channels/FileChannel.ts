@@ -199,6 +199,32 @@ export class FileChannel implements LogChannel {
 			for (const line of pending) this.#stream.write(line);
 			this.#stream.end();
 			this.#stream = null;
+			return;
+		}
+		// No stream, because a rotation is in flight: it nulls the stream before
+		// awaiting the old one's end, and it will not reopen now that #closed is
+		// set. Writing the buffer to the stream that no longer exists is how
+		// those lines used to disappear — accepted by write(), then dropped.
+		//
+		// Appended directly instead, and synchronously, because close() is: the
+		// path is the current log either way, whether the rotation has renamed
+		// it yet or not.
+		this.#appendDirectly(pending);
+	}
+
+	/** Last-resort write for lines with no stream left to carry them. */
+	#appendDirectly(lines: string[]): void {
+		if (lines.length === 0) return;
+		try {
+			if (!this.#dirReady) {
+				fs.mkdirSync(path.dirname(this.#filePath), { recursive: true });
+				this.#dirReady = true;
+			}
+			fs.appendFileSync(this.#filePath, lines.join(""));
+		} catch {
+			process.stderr.write(
+				`[Spectrum] FileChannel: ${lines.length} buffered line(s) lost closing '${this.#filePath}'\n`,
+			);
 		}
 	}
 }
