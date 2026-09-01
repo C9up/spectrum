@@ -204,3 +204,81 @@ describe("spectrum > FileChannel close during rotation", () => {
 		expect(contents).not.toContain("AFTER-CLOSE");
 	});
 });
+
+describe("spectrum > rotation keeps every generation", () => {
+	let dir: string;
+	let logPath: string;
+
+	beforeEach(async () => {
+		dir = await fsp.mkdtemp(path.join(os.tmpdir(), "spectrum-rot-"));
+		logPath = path.join(dir, "app.log");
+	});
+
+	afterEach(async () => {
+		await flush(80);
+		await fsp.rm(dir, { recursive: true, force: true });
+	});
+
+	it("shifts .1 to .2 instead of moving the live file straight to .2", async () => {
+		// The loop renamed the ACTIVE file to `.2` on its i===1 pass, so `.1` was
+		// never written and the follow-up rename of the live file found nothing.
+		// With maxFiles=3 that keeps ONE generation where two were configured,
+		// and each rotation destroys the one before it.
+		const channel = new FileChannel({
+			path: logPath,
+			maxSizeBytes: 150,
+			maxFiles: 3,
+		});
+
+		channel.write(makeEntry({ message: `A${"a".repeat(200)}` }));
+		await flush(60);
+		channel.write(makeEntry({ message: `B${"b".repeat(200)}` }));
+		await flush(60);
+		channel.write(makeEntry({ message: `C${"c".repeat(200)}` }));
+		await flush(60);
+		channel.close();
+		await flush(60);
+
+		const files = (await fsp.readdir(dir)).sort();
+		expect(files).toContain("app.log.1");
+		expect(files).toContain("app.log.2");
+
+		// Both older generations survive, in order: .1 is the most recent of them.
+		const read = (f: string) => fs.readFileSync(path.join(dir, f), "utf8");
+		const all = files.map(read).join("");
+		expect(all).toContain("A");
+		expect(all).toContain("B");
+	});
+
+	it("writes an entry larger than maxSizeBytes instead of rotating forever", async () => {
+		// The size check rotated whenever `current + bytes > max`. After a
+		// rotation `current` is 0, so a line bigger than `max` on its own still
+		// failed the check — it went back on the buffer, scheduled another
+		// rotation, and was never written at all.
+		const channel = new FileChannel({
+			path: logPath,
+			maxSizeBytes: 50,
+			maxFiles: 3,
+		});
+
+		channel.write(makeEntry({ message: `OVERSIZED${"x".repeat(500)}` }));
+		await flush(120);
+
+		// Written WITHOUT close(): the point is that it lands, not that a
+		// shutdown flush eventually rescues it.
+		const onDisk = () =>
+			fs
+				.readdirSync(dir)
+				.map((f) => fs.readFileSync(path.join(dir, f), "utf8"))
+				.join("");
+		expect(onDisk()).toContain("OVERSIZED");
+
+		// …and it did not churn through the generations getting there: a fresh
+		// file plus at most the one it rotated out of.
+		expect((await fsp.readdir(dir)).length).toBeLessThanOrEqual(2);
+
+		channel.close();
+		await flush(60);
+		expect(onDisk()).toContain("OVERSIZED");
+	});
+});

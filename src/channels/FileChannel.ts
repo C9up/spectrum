@@ -76,7 +76,7 @@ export class FileChannel implements LogChannel {
 			}
 		}
 
-		if (this.#currentSize + bytes > this.#maxSize) {
+		if (this.#needsRotation(bytes)) {
 			this.#pending.push(line);
 			this.#scheduleRotation();
 			return;
@@ -111,6 +111,23 @@ export class FileChannel implements LogChannel {
 		});
 	}
 
+	/**
+	 * Whether this line has to wait for a rotation.
+	 *
+	 * The empty-file test is what stops an entry LARGER than `maxSizeBytes`
+	 * from spinning forever: a fresh file starts at zero, so `0 + bytes > max`
+	 * was still true and the line went back on the buffer, scheduled another
+	 * rotation, and came back to the same answer — churning through a
+	 * generation each time and never being written.
+	 *
+	 * A log line cannot be split, so an oversized one is written whole into a
+	 * file of its own and the next line rotates. Bigger than the limit once
+	 * beats absent.
+	 */
+	#needsRotation(bytes: number): boolean {
+		return this.#currentSize > 0 && this.#currentSize + bytes > this.#maxSize;
+	}
+
 	#scheduleRotation(): void {
 		if (this.#rotating || this.#closed) return;
 		this.#rotating = true;
@@ -129,13 +146,20 @@ export class FileChannel implements LogChannel {
 			const oldest = `${this.#filePath}.${this.#maxFiles - 1}`;
 			await fsp.rm(oldest, { force: true });
 
+			// Shift the numbered generations up, oldest first: .1 → .2, .2 → .3…
+			//
+			// The i===1 pass used to take the LIVE file rather than `.1`, so `.1`
+			// was never written and the rename below found nothing left to move.
+			// With maxFiles=3 that kept one generation where two were configured,
+			// and every rotation destroyed the one before it.
 			for (let i = this.#maxFiles - 2; i >= 1; i--) {
-				const from = i === 1 ? this.#filePath : `${this.#filePath}.${i}`;
-				const to = `${this.#filePath}.${i + 1}`;
 				try {
-					await fsp.rename(from, to);
+					await fsp.rename(
+						`${this.#filePath}.${i}`,
+						`${this.#filePath}.${i + 1}`,
+					);
 				} catch {
-					// File doesn't exist — skip
+					// That generation does not exist yet — skip
 				}
 			}
 
@@ -164,7 +188,7 @@ export class FileChannel implements LogChannel {
 			const line = this.#pending.shift();
 			if (!line) continue;
 			const bytes = Buffer.byteLength(line, "utf8");
-			if (this.#currentSize + bytes > this.#maxSize) {
+			if (this.#needsRotation(bytes)) {
 				this.#pending.unshift(line);
 				this.#scheduleRotation();
 				return;
