@@ -90,3 +90,60 @@ describe("spectrum > FileChannel", () => {
 		await flush();
 	});
 });
+
+describe("spectrum > close() is terminal", () => {
+	let dir: string;
+	let logPath: string;
+
+	beforeEach(async () => {
+		dir = await fsp.mkdtemp(path.join(os.tmpdir(), "spectrum-close-"));
+		logPath = path.join(dir, "app.log");
+	});
+
+	afterEach(async () => {
+		await flush();
+		await fsp.rm(dir, { recursive: true, force: true });
+	});
+
+	it("writes nothing after close, and does not reopen the file", async () => {
+		const ch = new FileChannel({ path: logPath });
+		ch.write(makeEntry({ msg: "before" }));
+		ch.close();
+		ch.write(makeEntry({ msg: "after" }));
+		await flush();
+
+		// `close()` only nulled the stream, and `write()` reopens a null stream —
+		// so the second line silently reopened the file and appended to it.
+		const body = fs.readFileSync(logPath, "utf8");
+		expect(body).toContain("before");
+		expect(body).not.toContain("after");
+	});
+
+	it("flushes what a rotation had buffered rather than dropping it", async () => {
+		// Small enough that the second line triggers a rotation and lands in the
+		// pending buffer.
+		const ch = new FileChannel({ path: logPath, maxSize: 120 });
+		ch.write(makeEntry({ msg: "x".repeat(100) }));
+		ch.write(makeEntry({ msg: "buffered-line" }));
+		ch.close();
+		await flush();
+
+		// Those lines were accepted; dropping them at close loses log the caller
+		// believed was written.
+		const written = fs
+			.readdirSync(dir)
+			.map((f) => fs.readFileSync(path.join(dir, f), "utf8"))
+			.join("");
+		expect(written).toContain("buffered-line");
+	});
+
+	it("is safe to call twice", () => {
+		const ch = new FileChannel({ path: logPath });
+		ch.write(makeEntry({ msg: "one" }));
+
+		expect(() => {
+			ch.close();
+			ch.close();
+		}).not.toThrow();
+	});
+});

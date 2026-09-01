@@ -28,6 +28,14 @@ export class FileChannel implements LogChannel {
 	#currentSize = 0;
 	#dirReady = false;
 	#rotating = false;
+	/**
+	 * Terminal once `close()` has run.
+	 *
+	 * Nulling the stream was not enough: `write()` reopens a null stream, and so
+	 * does a rotation, so a line written after close silently reopened the file
+	 * and appended to it. A closed channel stays closed.
+	 */
+	#closed = false;
 	#pending: string[] = [];
 
 	constructor(config: FileChannelConfig) {
@@ -37,6 +45,7 @@ export class FileChannel implements LogChannel {
 	}
 
 	write(entry: LogEntry): void {
+		if (this.#closed) return;
 		const line = `${JSON.stringify(entry)}\n`;
 		const bytes = Buffer.byteLength(line, "utf8");
 
@@ -80,6 +89,8 @@ export class FileChannel implements LogChannel {
 	}
 
 	#openStream(): void {
+		// A rotation in flight when `close()` lands must not bring the file back.
+		if (this.#closed) return;
 		// mkdirSync + statSync only on first open (boot) — never on the hot path.
 		// The fast write path goes straight through this.#stream.write() (non-blocking).
 		if (!this.#dirReady) {
@@ -101,7 +112,7 @@ export class FileChannel implements LogChannel {
 	}
 
 	#scheduleRotation(): void {
-		if (this.#rotating) return;
+		if (this.#rotating || this.#closed) return;
 		this.#rotating = true;
 		queueMicrotask(() => {
 			this.#rotate().finally(() => {
@@ -172,8 +183,20 @@ export class FileChannel implements LogChannel {
 		});
 	}
 
+	/**
+	 * Stop writing, for good.
+	 *
+	 * Anything buffered by a rotation goes out first — those lines were accepted
+	 * and dropping them at close loses log the caller believed was written — and
+	 * the flag is set before the flush so nothing the flush triggers can reopen
+	 * the file.
+	 */
 	close(): void {
+		if (this.#closed) return;
+		const pending = this.#pending.splice(0);
+		this.#closed = true;
 		if (this.#stream) {
+			for (const line of pending) this.#stream.write(line);
 			this.#stream.end();
 			this.#stream = null;
 		}
