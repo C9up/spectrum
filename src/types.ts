@@ -9,13 +9,21 @@ export type LogLevel = "trace" | "debug" | "info" | "warn" | "error" | "fatal";
 /** A configured level, including pino's `silent` (disables all output). */
 export type LogLevelWithSilent = LogLevel | "silent";
 
+/**
+ * The numeric value of each level, on pino's scale.
+ *
+ * Only the ORDER matters to the comparisons here, but the numbers are what
+ * `logger.levels` and `logger.levelNumber` hand back, and those are read
+ * against the ecosystem's values: an `info` line is 30 everywhere upstream
+ * reaches, so it is 30 here.
+ */
 export const LOG_LEVEL_ORDER: Record<LogLevel, number> = {
-	trace: 0,
-	debug: 1,
-	info: 2,
-	warn: 3,
-	error: 4,
-	fatal: 5,
+	trace: 10,
+	debug: 20,
+	info: 30,
+	warn: 40,
+	error: 50,
+	fatal: 60,
 };
 
 /** Threshold for the `silent` level — nothing is ever above it. */
@@ -24,6 +32,33 @@ export const SILENT_THRESHOLD = Number.POSITIVE_INFINITY;
 /** Numeric threshold for a configured level (`silent` → +Infinity). */
 export function levelThreshold(level: LogLevelWithSilent): number {
 	return level === "silent" ? SILENT_THRESHOLD : LOG_LEVEL_ORDER[level];
+}
+
+const CONFIGURED_LEVELS = new Set<string>([
+	...Object.keys(LOG_LEVEL_ORDER),
+	"silent",
+]);
+
+/** Whether a value is a level a config may name. */
+export function isLogLevelWithSilent(
+	value: unknown,
+): value is LogLevelWithSilent {
+	return typeof value === "string" && CONFIGURED_LEVELS.has(value);
+}
+
+/**
+ * Narrow an untyped level — `process.env.LOG_LEVEL`, a CLI flag — to one the
+ * config can name, falling back to `info`.
+ *
+ * Without it a config file has to assert the env string into the union, and an
+ * assertion is the wrong tool for a value that comes from outside the program:
+ * it claims to know what it cannot. This checks.
+ */
+export function logLevel(
+	raw: unknown,
+	fallback: LogLevelWithSilent = "info",
+): LogLevelWithSilent {
+	return isLogLevelWithSilent(raw) ? raw : fallback;
 }
 
 export interface LogEntry {
@@ -66,7 +101,15 @@ export interface RedactOptions {
  * / pino, with spectrum divergences called out inline.
  */
 export interface LogConfig {
-	/** Turn the logger off while keeping its API callable (no-op). Default: true. */
+	/**
+	 * Turn the logger off while keeping its API callable (no-op). Default: true.
+	 *
+	 * Named deviation: upstream reads this as `!!config.enabled`, so a config
+	 * that never writes it has a logger that silently logs nothing. That only
+	 * works because upstream's own generated config always writes `enabled:
+	 * true` — a default that turns the feature off is a trap for every config
+	 * written by hand.
+	 */
 	enabled?: boolean;
 	/** Optional logger name (assigned by the manager when omitted). */
 	name?: string;

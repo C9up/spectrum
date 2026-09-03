@@ -3,26 +3,14 @@ import { ConsoleChannel } from "./channels/ConsoleChannel.js";
 import { Logger } from "./Logger.js";
 import { LoggerManager } from "./LoggerManager.js";
 import { setLogger } from "./services/main.js";
+import { channelsFromTargets } from "./targets.js";
 import type {
 	LogChannel,
 	LogConfig,
 	LoggerManagerConfig,
 	LogLevelWithSilent,
 } from "./types.js";
-import { LOG_LEVEL_ORDER } from "./types.js";
-
-const VALID_LEVELS = new Set<string>([
-	...Object.keys(LOG_LEVEL_ORDER),
-	"silent",
-]);
-
-function isValidLevel(raw: unknown): raw is LogLevelWithSilent {
-	return typeof raw === "string" && VALID_LEVELS.has(raw);
-}
-
-function resolveLogLevel(raw: unknown): LogLevelWithSilent {
-	return isValidLevel(raw) ? raw : "info";
-}
+import { isLogLevelWithSilent, logLevel } from "./types.js";
 
 /** A channel that owns a resource (e.g. a FileChannel WriteStream) to release on shutdown. */
 function hasClose(ch: LogChannel): ch is LogChannel & { close(): void } {
@@ -120,15 +108,29 @@ export default class SpectrumProvider {
 	}
 
 	#normalizeLogger(cfg: Partial<LogConfig>): LogConfig {
-		// Honour the configured channels; fall back to a pretty console channel
-		// only when none are supplied.
-		const channels =
-			cfg.channels && cfg.channels.length > 0
-				? cfg.channels
-				: [new ConsoleChannel("pretty")];
-		const level = isValidLevel(cfg.level)
+		const level = isLogLevelWithSilent(cfg.level)
 			? cfg.level
-			: resolveLogLevel(process.env.LOG_LEVEL);
+			: logLevel(process.env.LOG_LEVEL);
+		// An AdonisJS `config/logger.ts` declares its output as
+		// `transport.targets`, not as channels. It has to be converted HERE:
+		// filling `channels` in with the console fallback below is what stopped
+		// the Logger's own conversion from ever running (it only fires when
+		// `channels` is absent), so a config that declared a file target reached
+		// production writing to a console and nothing to the file it named.
+		const channels = this.#channelsFor(cfg, level);
 		return { ...cfg, level, channels };
+	}
+
+	/** Explicit channels, else the declared targets, else a pretty console. */
+	#channelsFor(
+		cfg: Partial<LogConfig>,
+		level: LogLevelWithSilent,
+	): LogChannel[] {
+		if (cfg.channels && cfg.channels.length > 0) return cfg.channels;
+		const declared = cfg.transport?.targets;
+		if (declared && declared.length > 0) {
+			return channelsFromTargets(declared, level);
+		}
+		return [new ConsoleChannel("pretty")];
 	}
 }

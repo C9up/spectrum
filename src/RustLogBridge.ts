@@ -62,8 +62,60 @@ export function parseRustLog(line: string): LogEntry | null {
  *   // ... Rust crates emit to stderr
  *   bridge.stop()
  */
+/**
+ * `process.stderr.write` exactly as it was found, so `stop()` puts THAT back.
+ *
+ * Storing a bound copy instead meant every start wrapped the previous stop's
+ * restoration in one more `bind`, so a process that started and stopped the
+ * bridge repeatedly grew a chain of wrappers around its own stderr.
+ */
 let activeOriginalWrite: typeof process.stderr.write | undefined;
 let activeBridge: { stop: () => void } | undefined;
+
+/** The flush callback `stream.write(chunk, encoding?, callback?)` may carry. */
+type WriteCallback = (error?: Error | null) => void;
+
+function isWriteCallback(value: unknown): value is WriteCallback {
+	return typeof value === "function";
+}
+
+const BUFFER_ENCODINGS = new Set<string>([
+	"ascii",
+	"utf8",
+	"utf-8",
+	"utf16le",
+	"utf-16le",
+	"ucs2",
+	"ucs-2",
+	"base64",
+	"base64url",
+	"latin1",
+	"binary",
+	"hex",
+]);
+
+function isBufferEncoding(value: unknown): value is BufferEncoding {
+	return typeof value === "string" && BUFFER_ENCODINGS.has(value);
+}
+
+/**
+ * Hand a chunk to the real `process.stderr.write`, callback included.
+ *
+ * The callback is the whole point of the indirection. It is the stream's
+ * promise that the chunk is out, and callers wait on it; a bridge that returns
+ * `true` without ever calling it leaves them waiting forever.
+ */
+function passThrough(
+	write: typeof process.stderr.write,
+	chunk: string | Uint8Array,
+	encoding: BufferEncoding | undefined,
+	done: WriteCallback | undefined,
+): boolean {
+	// `encoding` stays in its own position even when absent: Node reads an
+	// `undefined` encoding as "the stream's default", and passing it keeps the
+	// callback in the slot the three-argument form expects.
+	return write.call(process.stderr, chunk, encoding, done);
+}
 
 export function createRustLogBridge(channels: LogChannel[]): {
 	start: () => void;
@@ -75,27 +127,38 @@ export function createRustLogBridge(channels: LogChannel[]): {
 		start() {
 			if (activeBridge === bridge) return;
 			if (activeBridge) {
-				const prev = activeOriginalWrite;
+				// `stop()` has already restored it; say so through the restored
+				// write rather than through the one about to be installed.
 				activeBridge.stop();
-				if (prev) {
-					process.stderr.write = prev as typeof process.stderr.write;
-					prev(
-						"[Spectrum] RustLogBridge replaced — previous bridge stopped. Only one bridge can be active per process.\n" as never,
-					);
-				}
+				process.stderr.write(
+					"[Spectrum] RustLogBridge replaced — previous bridge stopped. Only one bridge can be active per process.\n",
+				);
 			}
 
-			activeOriginalWrite = process.stderr.write.bind(process.stderr);
+			activeOriginalWrite = process.stderr.write;
 			activeBridge = bridge;
 
-			process.stderr.write = ((
+			// Written in the shape the stream's own `write` is declared in, so it
+			// can be installed without asserting that it fits.
+			process.stderr.write = (
 				chunk: string | Uint8Array,
-				...args: unknown[]
-			) => {
+				encodingOrCallback?: BufferEncoding | WriteCallback,
+				callback?: WriteCallback,
+			): boolean => {
 				const origWrite = activeOriginalWrite;
 				if (!origWrite) return true;
+				const encoding = isBufferEncoding(encodingOrCallback)
+					? encodingOrCallback
+					: undefined;
+				// `write(chunk, callback)` puts the callback where the encoding
+				// would be.
+				const done = isWriteCallback(callback)
+					? callback
+					: isWriteCallback(encodingOrCallback)
+						? encodingOrCallback
+						: undefined;
 				if (bridgingDepth > 0) {
-					return origWrite(chunk as never, ...(args as []));
+					return passThrough(origWrite, chunk, encoding, done);
 				}
 
 				const str =
@@ -138,22 +201,25 @@ export function createRustLogBridge(channels: LogChannel[]): {
 
 				// Preserve original chunk when we didn't intercept any Rust logs.
 				if (!hadRustLog) {
-					return origWrite(chunk as never, ...(args as []));
+					return passThrough(origWrite, chunk, encoding, done);
 				}
 
+				// Something was consumed, so the chunk cannot go out verbatim.
+				// What is left still carries the caller's callback; when nothing
+				// is left, it is called here rather than dropped.
 				if (passthrough) {
-					origWrite(passthrough);
+					return passThrough(origWrite, passthrough, undefined, done);
 				}
+				done?.();
 
 				return true;
-			}) as typeof process.stderr.write;
+			};
 		},
 
 		stop() {
 			if (activeBridge !== bridge) return;
 			if (activeOriginalWrite) {
-				process.stderr.write =
-					activeOriginalWrite as typeof process.stderr.write;
+				process.stderr.write = activeOriginalWrite;
 				activeOriginalWrite = undefined;
 			}
 			activeBridge = undefined;

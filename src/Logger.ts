@@ -14,6 +14,7 @@
  */
 
 import { format } from "node:util";
+import { parseRedactPath, redactPath } from "./redact.js";
 import { sanitizeLogValue } from "./sanitize.js";
 import { channelsFromTargets } from "./targets.js";
 import type {
@@ -44,15 +45,51 @@ function isMergeableObject(value: unknown): value is Record<string, unknown> {
 	);
 }
 
+/** How far down a `cause` chain to follow before calling it a cycle. */
+const MAX_CAUSE_DEPTH = 8;
+
 /**
- * Serialize an Error into a plain `{ name, message, stack }` — the pino `err`
- * serializer parity. Non-Error values pass through untouched.
+ * Serialize an Error the way pino's `err` serializer does. Non-Error values
+ * pass through untouched.
+ *
+ * `{ name, message, stack }` threw away everything the error was carrying.
+ * `err.code` is usually the one field a log search is keyed on, and the `cause`
+ * of a wrapped error is the half that says what actually failed — both were
+ * dropped, silently, by a serializer whose job is to keep them.
  */
-function serializeError(value: unknown): unknown {
-	if (value instanceof Error) {
-		return { name: value.name, message: value.message, stack: value.stack };
+function serializeError(value: unknown, depth = 0): unknown {
+	if (!(value instanceof Error)) return value;
+
+	// Own ENUMERABLE properties only, which on an Error means the ones it was
+	// given: `message`, `stack` and `name` are not among them.
+	const out: Record<string, unknown> = { ...value };
+	for (const [key, nested] of Object.entries(out)) {
+		if (nested instanceof Error && depth < MAX_CAUSE_DEPTH) {
+			out[key] = serializeError(nested, depth + 1);
+		}
 	}
-	return value;
+
+	// Upstream reads the constructor rather than `name`, so a subclass that
+	// never assigns `this.name` is still reported as itself, and it names the
+	// field `type` — which is what an Adonis log pipeline reads.
+	out.type =
+		typeof value.constructor === "function"
+			? value.constructor.name
+			: value.name;
+	out.message = value.message;
+	out.stack = value.stack;
+	if (value instanceof AggregateError && Array.isArray(value.errors)) {
+		out.aggregateErrors = value.errors.map((each) =>
+			depth < MAX_CAUSE_DEPTH ? serializeError(each, depth + 1) : String(each),
+		);
+	}
+	if (value.cause !== undefined) {
+		out.cause =
+			depth < MAX_CAUSE_DEPTH
+				? serializeError(value.cause, depth + 1)
+				: "[cause chain too deep]";
+	}
+	return out;
 }
 
 const DEFAULT_SERIALIZERS: Record<string, LogSerializer> = {
@@ -60,36 +97,22 @@ const DEFAULT_SERIALIZERS: Record<string, LogSerializer> = {
 	error: serializeError,
 };
 
-/**
- * Copy-on-write redaction of a single dot-path. Never mutates the input; only
- * the objects along the path are shallow-copied.
- */
-function redactPath(
-	obj: Record<string, unknown>,
-	path: string,
-	censor: string,
-): Record<string, unknown> {
-	const dot = path.indexOf(".");
-	const head = dot === -1 ? path : path.slice(0, dot);
-	if (!(head in obj)) return obj;
-
-	const copy: Record<string, unknown> = { ...obj };
-	if (dot === -1) {
-		copy[head] = censor;
-	} else {
-		const child = copy[head];
-		if (isMergeableObject(child)) {
-			copy[head] = redactPath(child, path.slice(dot + 1), censor);
-		}
-	}
-	return copy;
-}
-
 export class Logger {
 	#config: LogConfig;
 	#module: string;
 	#correlationId?: string;
 	#bindings: Record<string, unknown>;
+	/**
+	 * This instance's level, when it has been set on the instance.
+	 *
+	 * The config object is shared by reference with the parent, every sibling
+	 * child and the manager, so writing the level into it made
+	 * `child.level = 'debug'` turn on debug for the whole application. pino
+	 * keeps the level on the logger; so does this.
+	 */
+	#level?: LogLevelWithSilent;
+	/** `config.redact` compiled once, as pino compiles its redactor once. */
+	readonly #redactPaths: string[][];
 
 	constructor(
 		config: LogConfig,
@@ -103,11 +126,21 @@ export class Logger {
 		// specific statement of intent.
 		this.#config =
 			config.channels === undefined && config.transport?.targets !== undefined
-				? { ...config, channels: channelsFromTargets(config.transport.targets) }
+				? {
+						...config,
+						channels: channelsFromTargets(
+							config.transport.targets,
+							config.level,
+						),
+					}
 				: config;
 		this.#module = module;
 		this.#correlationId = correlationId;
 		this.#bindings = bindings;
+		const redact = this.#config.redact;
+		const paths =
+			redact === undefined ? [] : Array.isArray(redact) ? redact : redact.paths;
+		this.#redactPaths = paths.map(parseRedactPath);
 	}
 
 	/** Whether the logger is enabled. When false every log call is a no-op. */
@@ -115,13 +148,13 @@ export class Logger {
 		return this.#config.enabled !== false;
 	}
 
-	/** The configured level for this logger. */
+	/** The level this logger is at. */
 	get level(): LogLevelWithSilent {
-		return this.#config.level ?? "info";
+		return this.#level ?? this.#config.level ?? "info";
 	}
 
 	set level(level: LogLevelWithSilent) {
-		this.#config.level = level;
+		this.#level = level;
 	}
 
 	/** Numeric value of the current level (`silent` → +Infinity). */
@@ -150,9 +183,22 @@ export class Logger {
 	/**
 	 * Run `callback` only when `level` is enabled — useful to guard expensive
 	 * log-data computation.
+	 *
+	 * An async callback's promise is HANDED BACK, as upstream hands it back.
+	 * Swallowing it turned a rejection inside the guarded block into an
+	 * unhandled rejection with no caller able to await it.
 	 */
-	ifLevelEnabled(level: LogLevel, callback: (logger: this) => void): void {
-		if (this.isLevelEnabled(level)) callback(this);
+	ifLevelEnabled(
+		level: LogLevel,
+		callback: (logger: this) => Promise<void>,
+	): Promise<void> | undefined;
+	ifLevelEnabled(level: LogLevel, callback: (logger: this) => void): void;
+	ifLevelEnabled(
+		level: LogLevel,
+		callback: (logger: this) => unknown,
+	): unknown {
+		if (this.isLevelEnabled(level)) return callback(this);
+		return undefined;
 	}
 
 	/**
@@ -166,15 +212,21 @@ export class Logger {
 		const nextModule = typeof module === "string" ? module : this.#module;
 		const nextCorrelation =
 			typeof correlationId === "string" ? correlationId : this.#correlationId;
-		return new Logger(this.#config, nextModule, nextCorrelation, {
+		const child = new Logger(this.#config, nextModule, nextCorrelation, {
 			...this.#bindings,
 			...rest,
 		});
+		// A child starts where its parent stands now, and moves on its own
+		// afterwards — pino's semantics, and the reason the level cannot live
+		// in the config the two of them share.
+		if (this.#level !== undefined) child.level = this.#level;
+		return child;
 	}
 
-	/** Current bindings (child bindings + module/correlationId conventions). */
+	/** Current bindings (logger name + child bindings + module/correlationId). */
 	bindings(): Record<string, unknown> {
 		const out: Record<string, unknown> = {
+			...(this.#config.name !== undefined ? { name: this.#config.name } : {}),
 			...this.#bindings,
 			module: this.#module,
 		};
@@ -238,12 +290,18 @@ export class Logger {
 		this.#write("fatal", arg0, rest);
 	}
 
-	/** No-op — pino API-surface parity for the `silent` level. */
+	/**
+	 * No-op — the `silent` level exists so a call site can be written and stay
+	 * written. It takes the same arguments as every other level, because
+	 * upstream's does and switching a call to it must not stop compiling.
+	 */
+	silent(mergingObject: unknown, message?: string, ...values: unknown[]): void;
+	silent(message: string, ...values: unknown[]): void;
 	silent(): void {}
 
 	/** Resolve the numeric threshold for this logger + module. */
 	#threshold(): number {
-		const raw = this.#config.modules?.[this.#module] ?? this.#config.level;
+		const raw = this.#config.modules?.[this.#module] ?? this.level;
 		if (raw === "silent") return levelThreshold("silent");
 		if (typeof raw === "string" && isLogLevel(raw)) return LOG_LEVEL_ORDER[raw];
 		return LOG_LEVEL_ORDER.info;
@@ -302,18 +360,17 @@ export class Logger {
 	}
 
 	#applyRedact(bag: Record<string, unknown>): Record<string, unknown> {
+		if (this.#redactPaths.length === 0) return bag;
 		const redact = this.#config.redact;
-		if (!redact) return bag;
-		const paths = Array.isArray(redact) ? redact : redact.paths;
-		if (paths.length === 0) return bag;
-		const censor = Array.isArray(redact)
-			? "[Redacted]"
-			: (redact.censor ?? "[Redacted]");
-		let out = bag;
-		for (const path of paths) {
-			out = redactPath(out, path, censor);
+		const censor =
+			redact === undefined || Array.isArray(redact)
+				? "[Redacted]"
+				: (redact.censor ?? "[Redacted]");
+		let out: unknown = bag;
+		for (const tokens of this.#redactPaths) {
+			out = redactPath(out, tokens, censor);
 		}
-		return out;
+		return isMergeableObject(out) ? out : bag;
 	}
 
 	#write(level: LogLevel, arg0: unknown, rest: unknown[]): void {
@@ -323,6 +380,11 @@ export class Logger {
 		const { message, mergingObject } = this.#resolveArgs(arg0, rest);
 
 		let bag: Record<string, unknown> = {
+			// The name a multi-logger config gave this logger. It was assigned by
+			// the manager and then read by nothing, so two loggers writing to the
+			// same destination produced lines with no way to tell them apart.
+			// pino carries it as a binding; a merging object still wins over it.
+			...(this.#config.name !== undefined ? { name: this.#config.name } : {}),
 			...this.#bindings,
 			...(mergingObject ?? {}),
 		};

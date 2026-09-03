@@ -2,6 +2,14 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { LogChannel, LogEntry } from "../../src/index.js";
 import { defineConfig, Logger, LoggerManager } from "../../src/index.js";
 
+/** Read a serialized sub-object without asserting a shape the compiler cannot see. */
+function record(value: unknown): Record<string, unknown> {
+	if (typeof value !== "object" || value === null) {
+		throw new Error(`expected an object, got ${String(value)}`);
+	}
+	return { ...value };
+}
+
 /** Narrow away null/undefined without a `!` assertion (which lies to the compiler). */
 function defined<T>(value: T | null | undefined): T {
 	if (value == null) throw new Error("expected a defined value");
@@ -44,13 +52,12 @@ describe("logger > object-first / merging object (gap 4)", () => {
 		expect(defined(channel.entries[0]).a).toBeUndefined();
 	});
 
-	it("a bare Error becomes an `err` field serialized to name/message/stack", () => {
+	it("a bare Error becomes an `err` field serialized to type/message/stack", () => {
 		logger.error(new Error("boom"));
-		const err = defined(channel.entries[0]).err as {
-			name: string;
-			message: string;
-		};
-		expect(err.name).toBe("Error");
+		// `type`, not `name`: upstream's serializer reads the constructor and
+		// files it under that key, and an Adonis log pipeline reads it there.
+		const err = record(defined(channel.entries[0]).err);
+		expect(err.type).toBe("Error");
 		expect(err.message).toBe("boom");
 		expect(defined(channel.entries[0]).message).toBe("boom");
 	});
@@ -104,11 +111,11 @@ describe("logger > level API (gap 5)", () => {
 		expect(ran).toBe(1);
 	});
 
-	it("levelNumber and levels expose the mapping", () => {
+	it("levelNumber and levels expose the mapping, on the ecosystem's scale", () => {
 		const logger = new Logger({ level: "warn", channels: [] });
-		expect(logger.levelNumber).toBe(3);
-		expect(logger.levels.values.warn).toBe(3);
-		expect(logger.levels.labels[3]).toBe("warn");
+		expect(logger.levelNumber).toBe(40);
+		expect(logger.levels.values.warn).toBe(40);
+		expect(logger.levels.labels[40]).toBe("warn");
 	});
 });
 

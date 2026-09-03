@@ -20,6 +20,7 @@ export type {
 } from "./targets.js";
 export { channelsFromTargets, Targets, targets } from "./targets.js";
 export {
+	isLogLevelWithSilent,
 	type LogChannel,
 	type LogConfig,
 	type LogEntry,
@@ -27,5 +28,6 @@ export {
 	type LogLevelWithSilent,
 	type LogSerializer,
 	logEntryExtras,
+	logLevel,
 	type RedactOptions,
 } from "./types.js";
