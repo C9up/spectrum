@@ -1,3 +1,4 @@
+import "./augmentations.js";
 import { ConsoleChannel } from "./channels/ConsoleChannel.js";
 import { Logger } from "./Logger.js";
 import { LoggerManager } from "./LoggerManager.js";

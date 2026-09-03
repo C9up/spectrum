@@ -4,6 +4,8 @@
  * @implements FR54, FR55, FR56, FR57, FR58
  */
 
+import "./augmentations.js";
+
 export { ConsoleChannel } from "./channels/ConsoleChannel.js";
 export { FileChannel } from "./channels/FileChannel.js";
 export { defineConfig } from "./config.js";
