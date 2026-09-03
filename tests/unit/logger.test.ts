@@ -7,6 +7,13 @@ import {
 	parseRustLog,
 } from "../../src/index.js";
 
+/** Narrow away null/undefined without a `!` assertion (which lies to the compiler). */
+function defined<T>(value: T | null | undefined): T {
+	if (value == null) throw new Error("expected a defined value");
+	return value;
+}
+
+
 /** In-memory channel for testing. */
 class TestChannel implements LogChannel {
 	name = "test";
@@ -51,21 +58,21 @@ describe("logger > log levels", () => {
 
 	it("includes message and module", () => {
 		logger.info("test message");
-		expect(channel.entries[0].message).toBe("test message");
-		expect(channel.entries[0].module).toBe("app");
+		expect(defined(channel.entries[0]).message).toBe("test message");
+		expect(defined(channel.entries[0]).module).toBe("app");
 	});
 
 	it("includes timestamp as ISO 8601", () => {
 		logger.info("test");
-		expect(channel.entries[0].timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+		expect(defined(channel.entries[0]).timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 	});
 
 	it("merges a message-first data object at the entry root (pino parity)", () => {
 		logger.info("order", { orderId: "123", amount: 42 });
-		expect(channel.entries[0].orderId).toBe("123");
-		expect(channel.entries[0].amount).toBe(42);
+		expect(defined(channel.entries[0]).orderId).toBe("123");
+		expect(defined(channel.entries[0]).amount).toBe(42);
 		// The message-first structured form does not nest under `data`.
-		expect(channel.entries[0].data).toBeUndefined();
+		expect(defined(channel.entries[0]).data).toBeUndefined();
 	});
 });
 
@@ -76,7 +83,7 @@ describe("logger > correlation ID", () => {
 		logger.setCorrelationId("corr-abc");
 
 		logger.info("test");
-		expect(channel.entries[0].correlationId).toBe("corr-abc");
+		expect(defined(channel.entries[0]).correlationId).toBe("corr-abc");
 	});
 
 	it("child logger inherits correlation ID", () => {
@@ -87,8 +94,8 @@ describe("logger > correlation ID", () => {
 		const child = logger.child({ module: "OrderService" });
 		child.info("child log");
 
-		expect(channel.entries[0].module).toBe("OrderService");
-		expect(channel.entries[0].correlationId).toBe("parent-id");
+		expect(defined(channel.entries[0]).module).toBe("OrderService");
+		expect(defined(channel.entries[0]).correlationId).toBe("parent-id");
 	});
 
 	it("child logger can override correlation ID", () => {
@@ -98,7 +105,7 @@ describe("logger > correlation ID", () => {
 		const child = logger.child({ module: "test", correlationId: "child-id" });
 		child.info("test");
 
-		expect(channel.entries[0].correlationId).toBe("child-id");
+		expect(defined(channel.entries[0]).correlationId).toBe("child-id");
 	});
 });
 
@@ -116,7 +123,7 @@ describe("logger > per-module level override", () => {
 		busLogger.warn("should appear");
 
 		expect(channel.entries.length).toBe(1);
-		expect(channel.entries[0].level).toBe("warn");
+		expect(defined(channel.entries[0]).level).toBe("warn");
 	});
 });
 

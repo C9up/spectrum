@@ -2,6 +2,13 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { LogChannel, LogEntry } from "../../src/index.js";
 import { defineConfig, Logger, LoggerManager } from "../../src/index.js";
 
+/** Narrow away null/undefined without a `!` assertion (which lies to the compiler). */
+function defined<T>(value: T | null | undefined): T {
+	if (value == null) throw new Error("expected a defined value");
+	return value;
+}
+
+
 class TestChannel implements LogChannel {
 	name = "test";
 	entries: LogEntry[] = [];
@@ -21,7 +28,7 @@ describe("logger > object-first / merging object (gap 4)", () => {
 
 	it("merges an object-first merging object at the root", () => {
 		logger.info({ userId: 5, role: "admin" }, "logged in");
-		const e = channel.entries[0];
+		const e = defined(channel.entries[0]);
 		expect(e.message).toBe("logged in");
 		expect(e.userId).toBe(5);
 		expect(e.role).toBe("admin");
@@ -29,27 +36,27 @@ describe("logger > object-first / merging object (gap 4)", () => {
 
 	it("interpolates printf tokens via util.format", () => {
 		logger.info("user %s did %d actions", "bob", 3);
-		expect(channel.entries[0].message).toBe("user bob did 3 actions");
+		expect(defined(channel.entries[0]).message).toBe("user bob did 3 actions");
 	});
 
 	it("interpolates %o object tokens instead of merging", () => {
 		logger.info("payload %o", { a: 1 });
-		expect(channel.entries[0].message).toContain("a: 1");
-		expect(channel.entries[0].a).toBeUndefined();
+		expect(defined(channel.entries[0]).message).toContain("a: 1");
+		expect(defined(channel.entries[0]).a).toBeUndefined();
 	});
 
 	it("a bare Error becomes an `err` field serialized to name/message/stack", () => {
 		logger.error(new Error("boom"));
-		const err = channel.entries[0].err as { name: string; message: string };
+		const err = defined(channel.entries[0]).err as { name: string; message: string };
 		expect(err.name).toBe("Error");
 		expect(err.message).toBe("boom");
-		expect(channel.entries[0].message).toBe("boom");
+		expect(defined(channel.entries[0]).message).toBe("boom");
 	});
 
 	it("structural fields cannot be overwritten by the merging object", () => {
 		logger.info({ level: "trace", module: "evil" }, "safe");
-		expect(channel.entries[0].level).toBe("info");
-		expect(channel.entries[0].module).toBe("app");
+		expect(defined(channel.entries[0]).level).toBe("info");
+		expect(defined(channel.entries[0]).module).toBe("app");
 	});
 });
 
@@ -108,9 +115,9 @@ describe("logger > public log() (gap 6)", () => {
 		const channel = new TestChannel();
 		const logger = new Logger({ level: "trace", channels: [channel] });
 		logger.log("debug", { a: 1 }, "hi");
-		expect(channel.entries[0].level).toBe("debug");
-		expect(channel.entries[0].a).toBe(1);
-		expect(channel.entries[0].message).toBe("hi");
+		expect(defined(channel.entries[0]).level).toBe("debug");
+		expect(defined(channel.entries[0]).a).toBe(1);
+		expect(defined(channel.entries[0]).message).toBe("hi");
 	});
 });
 
@@ -126,7 +133,7 @@ describe("logger > redact (gap 7)", () => {
 			{ password: "hunter2", authorization: "Bearer x", ok: 1 },
 			"login",
 		);
-		const e = channel.entries[0];
+		const e = defined(channel.entries[0]);
 		expect(e.password).toBe("[Redacted]");
 		expect(e.authorization).toBe("[Redacted]");
 		expect(e.ok).toBe(1);
@@ -141,7 +148,7 @@ describe("logger > redact (gap 7)", () => {
 		});
 		const input = { req: { headers: { authorization: "secret", host: "x" } } };
 		logger.info(input, "req");
-		const req = channel.entries[0].req as {
+		const req = defined(channel.entries[0]).req as {
 			headers: { authorization: string; host: string };
 		};
 		expect(req.headers.authorization).toBe("***");
@@ -156,7 +163,7 @@ describe("logger > serializers (gap 8)", () => {
 		const channel = new TestChannel();
 		const logger = new Logger({ level: "info", channels: [channel] });
 		logger.info({ err: new Error("bad") }, "failed");
-		const err = channel.entries[0].err as { message: string; stack: string };
+		const err = defined(channel.entries[0]).err as { message: string; stack: string };
 		expect(err.message).toBe("bad");
 		expect(typeof err.stack).toBe("string");
 	});
@@ -169,7 +176,7 @@ describe("logger > serializers (gap 8)", () => {
 			serializers: { user: (v) => `user:${(v as { id: number }).id}` },
 		});
 		logger.info({ user: { id: 7 } }, "hi");
-		expect(channel.entries[0].user).toBe("user:7");
+		expect(defined(channel.entries[0]).user).toBe("user:7");
 	});
 });
 
@@ -189,8 +196,8 @@ describe("logger > child bindings + bindings() (gaps 10, 11)", () => {
 		const logger = new Logger({ level: "info", channels: [channel] });
 		const child = logger.child({ requestId: "r-1", tenant: "acme" });
 		child.info("hit");
-		expect(channel.entries[0].requestId).toBe("r-1");
-		expect(channel.entries[0].tenant).toBe("acme");
+		expect(defined(channel.entries[0]).requestId).toBe("r-1");
+		expect(defined(channel.entries[0]).tenant).toBe("acme");
 	});
 
 	it("keeps module/correlationId as conventions and exposes bindings()", () => {
@@ -213,7 +220,7 @@ describe("defineConfig + LoggerManager (gaps 1, 2)", () => {
 		const channel = new TestChannel();
 		const config = defineConfig({ level: "info", channels: [channel] });
 		expect(config.default).toBe("app");
-		expect(config.loggers.app.level).toBe("info");
+		expect(defined(config.loggers.app).level).toBe("info");
 	});
 
 	it("returns the multi-logger form untouched and validates it", () => {
@@ -222,7 +229,7 @@ describe("defineConfig + LoggerManager (gaps 1, 2)", () => {
 			loggers: { main: { level: "debug", channels: [] } },
 		});
 		expect(config.default).toBe("main");
-		expect(config.loggers.main.level).toBe("debug");
+		expect(defined(config.loggers.main).level).toBe("debug");
 	});
 
 	it("throws when the default logger is missing", () => {

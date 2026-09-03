@@ -13,7 +13,15 @@ export class LoggerManager extends Logger {
 	#loggers: Map<string, Logger> = new Map();
 
 	constructor(config: LoggerManagerConfig) {
-		super(config.loggers[config.default]);
+		const selected = config.loggers[config.default];
+		if (selected === undefined) {
+			// Naming a logger that is not in `loggers` used to build a manager
+			// around undefined and fail on the first line written.
+			throw new Error(
+				`[spectrum] config.logger names '${config.default}', which is not in \`loggers\`. Declared: ${Object.keys(config.loggers).join(", ") || "(none)"}.`,
+			);
+		}
+		super(selected);
 		this.#config = config;
 	}
 

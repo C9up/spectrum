@@ -5,6 +5,13 @@ import SpectrumProvider, {
 	type SpectrumAppContext,
 } from "../../src/SpectrumProvider.js";
 
+/** Narrow away null/undefined without a `!` assertion (which lies to the compiler). */
+function defined<T>(value: T | null | undefined): T {
+	if (value == null) throw new Error("expected a defined value");
+	return value;
+}
+
+
 /** In-memory channel for asserting what the provider-built Logger emits. */
 class TestChannel implements LogChannel {
 	name = "test";
@@ -109,7 +116,7 @@ describe("spectrum > SpectrumProvider", () => {
 		busLogger.warn("appears — the module override lowers bus:rust to warn");
 		// Pre-fix: modules dropped → bus:rust used base 'error' → warn suppressed → 0.
 		expect(channel.entries).toHaveLength(1);
-		expect(channel.entries[0].level).toBe("warn");
+		expect(defined(channel.entries[0]).level).toBe("warn");
 	});
 
 	it("honours config.channels instead of hardcoding ConsoleChannel", async () => {

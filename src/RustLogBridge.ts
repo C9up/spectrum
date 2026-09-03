@@ -30,13 +30,22 @@ export function parseRustLog(line: string): LogEntry | null {
 		FATAL: "fatal",
 	};
 
-	const level = levelMap[match[1].toUpperCase()];
+	// All three groups are required by the pattern, so a match carries them.
+	const [, rawLevel, rawModule, rawMessage] = match;
+	if (
+		rawLevel === undefined ||
+		rawModule === undefined ||
+		rawMessage === undefined
+	) {
+		return null;
+	}
+	const level = levelMap[rawLevel.toUpperCase()];
 	if (!level) return null;
 
 	return {
 		level,
-		message: match[3],
-		module: match[2].replace(/_/g, "-"),
+		message: rawMessage,
+		module: rawModule.replace(/_/g, "-"),
 		timestamp: new Date().toISOString(),
 	};
 }

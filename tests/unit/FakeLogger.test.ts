@@ -2,6 +2,13 @@ import { describe, expect, it } from "vitest";
 import { FakeLogger } from "../../src/testing/FakeLogger.js";
 import type { LogEntry } from "../../src/types.js";
 
+/** Narrow away null/undefined without a `!` assertion (which lies to the compiler). */
+function defined<T>(value: T | null | undefined): T {
+	if (value == null) throw new Error("expected a defined value");
+	return value;
+}
+
+
 function makeEntry(overrides: Partial<LogEntry> = {}): LogEntry {
 	return {
 		level: overrides.level ?? "info",
@@ -18,17 +25,18 @@ describe("FakeLogger — LogChannel surface", () => {
 		const log = new FakeLogger();
 		log.write(makeEntry({ message: "first" }));
 		expect(log.getLogged()).toHaveLength(1);
-		expect(log.getLogged()[0].message).toBe("first");
+		expect(defined(log.getLogged()[0]).message).toBe("first");
 	});
 
 	it("getLogged returns a defensive snapshot", () => {
 		const log = new FakeLogger();
 		log.write(makeEntry({ data: { userId: 1 } }));
 		const snap = log.getLogged();
-		snap[0].message = "mutated";
-		if (snap[0].data) snap[0].data.userId = 99;
-		expect(log.getLogged()[0].message).toBe("hello");
-		expect(log.getLogged()[0].data?.userId).toBe(1);
+		defined(snap[0]).message = "mutated";
+		const first = defined(snap[0]);
+		if (first.data) first.data.userId = 99;
+		expect(defined(log.getLogged()[0]).message).toBe("hello");
+		expect(defined(log.getLogged()[0]).data?.userId).toBe(1);
 	});
 
 	it("captures an entry whose data carries a non-cloneable value (no drop)", () => {
@@ -40,9 +48,9 @@ describe("FakeLogger — LogChannel surface", () => {
 		log.write(makeEntry({ message: "with-fn", data: { cb: () => 1, n: 7 } }));
 		const logged = log.getLogged();
 		expect(logged).toHaveLength(1);
-		expect(logged[0].message).toBe("with-fn");
+		expect(defined(logged[0]).message).toBe("with-fn");
 		// The non-cloneable bits degrade gracefully; cloneable data survives.
-		expect(logged[0].data?.n).toBe(7);
+		expect(defined(logged[0]).data?.n).toBe(7);
 	});
 
 	it("reset clears the captured array", () => {
