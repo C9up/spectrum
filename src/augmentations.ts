@@ -22,6 +22,11 @@ import type { Logger } from "./Logger.js";
 declare module "@c9up/ream/types" {
 	interface ContainerBindings {
 		/** The logger, bound by `SpectrumProvider`. */
+		"spectrum.logger": Logger;
+		/**
+		 * The same binding under the name it had before the token carried its
+		 * package. Kept bound so an existing `container.make(...)` resolves.
+		 */
 		logger: Logger;
 	}
 }

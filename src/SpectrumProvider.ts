@@ -72,9 +72,15 @@ export default class SpectrumProvider {
 
 		const manager = new LoggerManager(managerConfig);
 		this.app.container.singleton(Logger, () => manager);
-		this.app.container.singleton("logger", () => {
-			return this.app.container.resolve<Logger>(Logger);
-		});
+		// Namespaced by the package that owns it, the way upstream namespaces
+		// `lucid.db`, `auth.manager` and `drive.manager` by theirs. The bare
+		// token stays bound beside it: it is what every existing
+		// `container.make(...)` asks for, and a token is not worth breaking an
+		// application over.
+		const logger = (): Promise<Logger> =>
+			this.app.container.resolve<Logger>(Logger);
+		this.app.container.singleton("spectrum.logger", logger);
+		this.app.container.singleton("logger", logger);
 	}
 
 	async boot() {
