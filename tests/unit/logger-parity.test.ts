@@ -8,7 +8,6 @@ function defined<T>(value: T | null | undefined): T {
 	return value;
 }
 
-
 class TestChannel implements LogChannel {
 	name = "test";
 	entries: LogEntry[] = [];
@@ -47,7 +46,10 @@ describe("logger > object-first / merging object (gap 4)", () => {
 
 	it("a bare Error becomes an `err` field serialized to name/message/stack", () => {
 		logger.error(new Error("boom"));
-		const err = defined(channel.entries[0]).err as { name: string; message: string };
+		const err = defined(channel.entries[0]).err as {
+			name: string;
+			message: string;
+		};
 		expect(err.name).toBe("Error");
 		expect(err.message).toBe("boom");
 		expect(defined(channel.entries[0]).message).toBe("boom");
@@ -163,7 +165,10 @@ describe("logger > serializers (gap 8)", () => {
 		const channel = new TestChannel();
 		const logger = new Logger({ level: "info", channels: [channel] });
 		logger.info({ err: new Error("bad") }, "failed");
-		const err = defined(channel.entries[0]).err as { message: string; stack: string };
+		const err = defined(channel.entries[0]).err as {
+			message: string;
+			stack: string;
+		};
 		expect(err.message).toBe("bad");
 		expect(typeof err.stack).toBe("string");
 	});

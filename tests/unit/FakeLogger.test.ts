@@ -8,7 +8,6 @@ function defined<T>(value: T | null | undefined): T {
 	return value;
 }
 
-
 function makeEntry(overrides: Partial<LogEntry> = {}): LogEntry {
 	return {
 		level: overrides.level ?? "info",

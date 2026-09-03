@@ -11,7 +11,6 @@ function defined<T>(value: T | null | undefined): T {
 	return value;
 }
 
-
 /** In-memory channel for asserting what the provider-built Logger emits. */
 class TestChannel implements LogChannel {
 	name = "test";

@@ -13,7 +13,6 @@ function defined<T>(value: T | null | undefined): T {
 	return value;
 }
 
-
 /** In-memory channel for testing. */
 class TestChannel implements LogChannel {
 	name = "test";
@@ -64,7 +63,9 @@ describe("logger > log levels", () => {
 
 	it("includes timestamp as ISO 8601", () => {
 		logger.info("test");
-		expect(defined(channel.entries[0]).timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+		expect(defined(channel.entries[0]).timestamp).toMatch(
+			/^\d{4}-\d{2}-\d{2}T/,
+		);
 	});
 
 	it("merges a message-first data object at the entry root (pino parity)", () => {
