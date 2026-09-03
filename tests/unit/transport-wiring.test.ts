@@ -59,10 +59,22 @@ function entryAt(level: LogEntry["level"], message: string): LogEntry {
 	};
 }
 
-/** Everything a file channel actually received, after its stream has flushed. */
+/**
+ * Everything a file channel actually received.
+ *
+ * The stream flushes on its own schedule, so this waits for content rather
+ * than for a fixed delay — a fixed one is a flake on a loaded runner. An empty
+ * result after the whole budget is a real answer: nothing was written.
+ */
 async function linesIn(destination: string): Promise<string> {
-	await new Promise((resolve) => setTimeout(resolve, 50));
-	return fs.existsSync(destination) ? fs.readFileSync(destination, "utf8") : "";
+	const deadline = Date.now() + 2000;
+	for (;;) {
+		const found = fs.existsSync(destination)
+			? fs.readFileSync(destination, "utf8")
+			: "";
+		if (found.length > 0 || Date.now() > deadline) return found;
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	}
 }
 
 const written: string[] = [];
@@ -100,13 +112,11 @@ describe("spectrum > a transport config through the provider", () => {
 
 		logger.info("to disk");
 		await provider.shutdown();
-		await new Promise((resolve) => setTimeout(resolve, 50));
 
 		// Pre-fix the provider filled `channels` in with a console before the
 		// Logger's own conversion could run, so the declared file target was
 		// replaced and this file was never created at all.
-		expect(fs.existsSync(destination)).toBe(true);
-		expect(fs.readFileSync(destination, "utf8")).toContain("to disk");
+		expect(await linesIn(destination)).toContain("to disk");
 	});
 
 	it("still falls back to a console when nothing is declared", async () => {
@@ -134,6 +144,9 @@ describe("spectrum > a target's own level", () => {
 		const written = await linesIn(destination);
 		expect(written).toContain("real");
 		expect(written).not.toContain("noisy");
+		// `noisy` never arriving is the point, so the wait above has to have
+		// been long enough for something to arrive at all.
+		expect(written).not.toBe("");
 	});
 
 	it("inherits the logger's level when the target names none", async () => {
