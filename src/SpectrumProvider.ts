@@ -2,7 +2,7 @@ import "./augmentations.js";
 import { ConsoleChannel } from "./channels/ConsoleChannel.js";
 import { Logger } from "./Logger.js";
 import { LoggerManager } from "./LoggerManager.js";
-import { setLogger } from "./services/main.js";
+import { clearLogger, getLogger, setLogger } from "./services/main.js";
 import { channelsFromTargets } from "./targets.js";
 import type {
 	LogChannel,
@@ -47,6 +47,9 @@ export interface SpectrumAppContext {
 }
 
 export default class SpectrumProvider {
+	/** The logger this provider bound, so shutdown only clears its own. */
+	#owned: Logger | undefined;
+
 	#channels: LogChannel[] = [];
 
 	constructor(protected app: SpectrumAppContext) {}
@@ -74,7 +77,9 @@ export default class SpectrumProvider {
 	}
 
 	async boot() {
-		setLogger(await this.app.container.resolve<Logger>(Logger));
+		const logger = await this.app.container.resolve<Logger>(Logger);
+		this.#owned = logger;
+		setLogger(logger);
 	}
 
 	/**
@@ -86,6 +91,11 @@ export default class SpectrumProvider {
 	 * `allSettled` so one channel failing to close does not strand the others.
 	 */
 	async shutdown() {
+		// Release the module-level singleton first, while it is still ours: past
+		// this point the channels are closing, and a logger reachable through
+		// `services/main` would be writing into streams that have ended.
+		if (this.#owned !== undefined && getLogger() === this.#owned) clearLogger();
+		this.#owned = undefined;
 		await Promise.allSettled(
 			this.#channels
 				.filter((channel) => hasClose(channel))

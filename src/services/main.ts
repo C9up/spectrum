@@ -23,6 +23,18 @@ export function getLogger(): Logger | undefined {
 	return instance;
 }
 
+/**
+ * @internal Release the singleton, so a shut-down application does not leave a
+ * dead logger reachable through `services/main`.
+ *
+ * The caller checks ownership first (`getLogger() === mine`): two applications
+ * share this module in one process, and the one shutting down must not clear
+ * what the other has since bound.
+ */
+export function clearLogger(): void {
+	instance = undefined;
+}
+
 const logger: Logger = new Proxy({} as Logger, {
 	get(_target, prop) {
 		if (!instance) {

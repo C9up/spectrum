@@ -150,3 +150,38 @@ describe("spectrum > SpectrumProvider", () => {
 		expect(closed).toBe(true);
 	});
 });
+
+describe("spectrum > SpectrumProvider > shutdown", () => {
+	it("releases the services/main singleton before closing the channels", async () => {
+		const { getLogger } = await import("../../src/services/main.js");
+		const { app } = makeApp();
+		const provider = new SpectrumProvider(app);
+		provider.register();
+		await provider.boot();
+		expect(getLogger()).toBeInstanceOf(Logger);
+
+		await provider.shutdown();
+
+		// Past shutdown the channels are closing, so a logger still reachable
+		// through `import logger from '@c9up/spectrum/services/main'` would be
+		// writing into streams that have ended.
+		expect(getLogger()).toBeUndefined();
+	});
+
+	it("leaves a logger another application has since bound alone", async () => {
+		const { getLogger } = await import("../../src/services/main.js");
+		const provider = new SpectrumProvider(makeApp().app);
+		provider.register();
+		await provider.boot();
+
+		const other = new SpectrumProvider(makeApp().app);
+		other.register();
+		await other.boot();
+		const replacement = getLogger();
+		if (!replacement) throw new Error("expected the second boot to bind one");
+
+		await provider.shutdown();
+
+		expect(getLogger()).toBe(replacement);
+	});
+});
