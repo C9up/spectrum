@@ -73,6 +73,28 @@ describe("spectrum > FileChannel", () => {
 		expect(content).toContain('"after"');
 	});
 
+	it("close() resolves only once every line is on disk", async () => {
+		// The other tests here sleep after closing, which hides the defect this
+		// guards: `end()` ASKS the stream to finish, it does not finish it. A
+		// shutdown that did not await the close reached `process.exit` with the
+		// last lines still buffered — and the last lines are usually the ones
+		// saying why the process was going down.
+		//
+		// Enough lines to exceed the stream's high-water mark, so the data
+		// cannot have landed in a single synchronous write.
+		const ch = new FileChannel({ path: logPath });
+		for (let i = 0; i < 4000; i += 1) {
+			ch.write(makeEntry({ message: `line-${i}` }));
+		}
+
+		await ch.close();
+
+		// Read IMMEDIATELY — no sleep. This is the assertion.
+		const content = await fsp.readFile(logPath, "utf8");
+		expect(content.trim().split("\n")).toHaveLength(4000);
+		expect(content).toContain('"line-3999"');
+	});
+
 	it("close() releases the stream so the file is no longer locked", async () => {
 		const ch = new FileChannel({ path: logPath });
 		ch.write(makeEntry());

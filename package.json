@@ -1,6 +1,6 @@
 {
 	"name": "@c9up/spectrum",
-	"version": "0.1.13",
+	"version": "0.1.14",
 	"description": "Spectrum \u2014 structured logging for the Ream framework",
 	"license": "MIT",
 	"type": "module",

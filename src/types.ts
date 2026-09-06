@@ -85,6 +85,16 @@ export type { TransportTargetOptions } from "./targets.js";
 export interface LogChannel {
 	name: string;
 	write(entry: LogEntry): void;
+	/**
+	 * Release whatever the channel holds open, and finish writing.
+	 *
+	 * Allowed to be asynchronous, and that is the point: a file channel ends a
+	 * stream, and ending one is a request, not a completion. Returning before
+	 * the `finish` event meant a shutdown could reach `process.exit` with the
+	 * last lines still in the kernel's hands — the lines about why the process
+	 * was shutting down, most of the time.
+	 */
+	close?(): void | Promise<void>;
 }
 
 /** Transforms a value before it is written (pino `serializers` parity). */

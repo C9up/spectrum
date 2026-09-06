@@ -13,7 +13,9 @@ import type {
 import { isLogLevelWithSilent, logLevel } from "./types.js";
 
 /** A channel that owns a resource (e.g. a FileChannel WriteStream) to release on shutdown. */
-function hasClose(ch: LogChannel): ch is LogChannel & { close(): void } {
+function hasClose(
+	ch: LogChannel,
+): ch is LogChannel & { close(): void | Promise<void> } {
 	return "close" in ch && typeof ch.close === "function";
 }
 
@@ -75,11 +77,20 @@ export default class SpectrumProvider {
 		setLogger(await this.app.container.resolve<Logger>(Logger));
 	}
 
-	/** Release channel resources (e.g. FileChannel WriteStreams) on shutdown. */
+	/**
+	 * Release channel resources (e.g. FileChannel WriteStreams) on shutdown.
+	 *
+	 * AWAITED, and all of them: closing a file channel ends a stream, and ending
+	 * one is a request rather than a completion. Firing them and returning let
+	 * the shutdown run on to `process.exit` with the last lines still buffered.
+	 * `allSettled` so one channel failing to close does not strand the others.
+	 */
 	async shutdown() {
-		for (const channel of this.#channels) {
-			if (hasClose(channel)) channel.close();
-		}
+		await Promise.allSettled(
+			this.#channels
+				.filter((channel) => hasClose(channel))
+				.map(async (channel) => channel.close()),
+		);
 	}
 
 	/**

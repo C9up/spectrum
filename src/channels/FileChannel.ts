@@ -215,14 +215,24 @@ export class FileChannel implements LogChannel {
 	 * the flag is set before the flush so nothing the flush triggers can reopen
 	 * the file.
 	 */
-	close(): void {
+	async close(): Promise<void> {
 		if (this.#closed) return;
 		const pending = this.#pending.splice(0);
 		this.#closed = true;
 		if (this.#stream) {
-			for (const line of pending) this.#stream.write(line);
-			this.#stream.end();
+			const stream = this.#stream;
+			for (const line of pending) stream.write(line);
 			this.#stream = null;
+			// AWAIT the flush. `end()` asks the stream to finish; it does not
+			// finish it. Returning here let a shutdown run on to `process.exit`
+			// with the last lines still buffered — and the last lines are usually
+			// the ones explaining why the process is going down.
+			await new Promise<void>((resolve) => {
+				stream.end(() => resolve());
+				// A stream that errors will never emit `finish`, and a shutdown
+				// must not hang on a full disk or a revoked permission.
+				stream.once("error", () => resolve());
+			});
 			return;
 		}
 		// No stream, because a rotation is in flight: it nulls the stream before
