@@ -304,3 +304,14 @@ describe("spectrum > rotation keeps every generation", () => {
 		expect(onDisk()).toContain("OVERSIZED");
 	});
 });
+
+/**
+ * `close()` has to wait for a rotation that is already running.
+ *
+ * A rotation renames the generations and opens a new stream, and it was fired
+ * with `queueMicrotask` and never held. A close arriving in the middle wrote
+ * the buffer to the stream the rotation was replacing and returned, while the
+ * renames carried on behind it — so the last lines, the ones explaining why the
+ * process is going down, landed in a file about to be moved or in one nothing
+ * would look at.
+ */

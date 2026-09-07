@@ -96,11 +96,28 @@ export default class SpectrumProvider {
 		// `services/main` would be writing into streams that have ended.
 		if (this.#owned !== undefined && getLogger() === this.#owned) clearLogger();
 		this.#owned = undefined;
-		await Promise.allSettled(
+		const results = await Promise.allSettled(
 			this.#channels
 				.filter((channel) => hasClose(channel))
 				.map(async (channel) => channel.close()),
 		);
+		// `allSettled` keeps one failure from stranding the others — that is why
+		// it is here — but the results were then thrown away. A channel that
+		// could not flush is lost log, and losing it silently during shutdown is
+		// how the lines explaining the shutdown disappear. Reported to stderr
+		// because the logger is exactly what has just been taken down.
+		const failures = results.filter(
+			(result): result is PromiseRejectedResult => result.status === "rejected",
+		);
+		for (const failure of failures) {
+			const reason =
+				failure.reason instanceof Error
+					? failure.reason.message
+					: String(failure.reason);
+			process.stderr.write(
+				`[spectrum] a channel failed to close; log written just before shutdown may be missing: ${reason}\n`,
+			);
+		}
 	}
 
 	/**

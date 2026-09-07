@@ -128,13 +128,26 @@ export class FileChannel implements LogChannel {
 		return this.#currentSize > 0 && this.#currentSize + bytes > this.#maxSize;
 	}
 
+	/** The rotation in flight, so `close()` can wait for it. */
+	#rotation: Promise<void> | null = null;
+
 	#scheduleRotation(): void {
 		if (this.#rotating || this.#closed) return;
 		this.#rotating = true;
-		queueMicrotask(() => {
-			this.#rotate().finally(() => {
-				this.#rotating = false;
-				this.#flushPending();
+		// The promise is KEPT, not just started. A rotation renames files and
+		// opens a new stream; `close()` arriving in the middle of that used to
+		// write the buffer to a stream the rotation was replacing and return,
+		// while the renames carried on behind it. The last lines — the ones
+		// explaining why the process is going down — could land in a file that
+		// was about to be moved, or in one nothing would look at.
+		this.#rotation = new Promise<void>((resolve) => {
+			queueMicrotask(() => {
+				this.#rotate().finally(() => {
+					this.#rotating = false;
+					this.#flushPending();
+					this.#rotation = null;
+					resolve();
+				});
 			});
 		});
 	}
@@ -217,8 +230,13 @@ export class FileChannel implements LogChannel {
 	 */
 	async close(): Promise<void> {
 		if (this.#closed) return;
-		const pending = this.#pending.splice(0);
+		// Closed FIRST, so nothing the rotation's flush triggers schedules
+		// another one, then wait for the rotation already in flight. Without
+		// this the two ran over each other and whichever finished last decided
+		// where the final lines were.
 		this.#closed = true;
+		await this.#rotation;
+		const pending = this.#pending.splice(0);
 		if (this.#stream) {
 			const stream = this.#stream;
 			for (const line of pending) stream.write(line);
