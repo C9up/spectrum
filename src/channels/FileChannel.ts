@@ -228,7 +228,21 @@ export class FileChannel implements LogChannel {
 	 * the flag is set before the flush so nothing the flush triggers can reopen
 	 * the file.
 	 */
-	async close(): Promise<void> {
+	close(): Promise<void> {
+		// Every caller awaits the SAME completion — the promise itself, not a
+		// wrapper around it, which is why this is not `async`. Returning early on `#closed`
+		// meant a second `close()` resolved while the first was still flushing,
+		// so a shutdown that closed two channels in parallel — or simply called
+		// this twice — believed the last lines were on disk when they were still
+		// in the stream.
+		this.#closing ??= this.#close();
+		return this.#closing;
+	}
+
+	/** The single closing run, memoised by {@link close}. */
+	#closing?: Promise<void>;
+
+	async #close(): Promise<void> {
 		if (this.#closed) return;
 		// Closed FIRST, so nothing the rotation's flush triggers schedules
 		// another one, then wait for the rotation already in flight. Without

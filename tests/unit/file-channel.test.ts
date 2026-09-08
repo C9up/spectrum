@@ -315,3 +315,36 @@ describe("spectrum > rotation keeps every generation", () => {
  * process is going down, landed in a file about to be moved or in one nothing
  * would look at.
  */
+
+describe("spectrum > closing twice", () => {
+	it("makes the second caller wait for the first, not sail past it", async () => {
+		// Returning early on the `closed` flag resolved the second call while
+		// the first was still flushing, so a shutdown closing channels in
+		// parallel believed the last lines were on disk when they were not.
+		const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "spectrum-twice-"));
+		const logPath = path.join(dir, "app.log");
+		const channel = new FileChannel({ path: logPath });
+		for (let i = 0; i < 20; i++) {
+			channel.write(makeEntry({ message: `line-${i}` }));
+		}
+
+		// Both start before either finishes.
+		await Promise.all([channel.close(), channel.close()]);
+
+		const written = await fsp.readFile(logPath, "utf8");
+		for (let i = 0; i < 20; i++) expect(written).toContain(`line-${i}`);
+		await fsp.rm(dir, { recursive: true, force: true });
+	});
+
+	it("hands every caller the same promise", async () => {
+		const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "spectrum-same-"));
+		const channel = new FileChannel({ path: path.join(dir, "app.log") });
+
+		const first = channel.close();
+		const second = channel.close();
+
+		expect(second).toBe(first);
+		await Promise.all([first, second]);
+		await fsp.rm(dir, { recursive: true, force: true });
+	});
+});
