@@ -1,5 +1,7 @@
 import * as fs from "node:fs";
+import { readFileSync } from "node:fs";
 import * as path from "node:path";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { configure } from "../../src/configure.js";
@@ -11,6 +13,27 @@ import type { LogChannel, LogEntry } from "../../src/types.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
+/**
+ * Read a stub the way `codemods.makeUsingStub` does.
+ *
+ * The real file, not a fixture: a test that stubbed this out would pass with
+ * a stub that does not exist.
+ */
+function renderStub(
+	stubsRoot: string,
+	stubPath: string,
+	state: Record<string, string | number | boolean>,
+): { to: string; body: string } {
+	const raw = readFileSync(resolve(stubsRoot, stubPath), "utf8");
+	const [, front = "", body = ""] = raw.split(/^---\r?\n/m, 3);
+	const declared = /^to:\s*(.+)$/m.exec(front)?.[1]?.trim() ?? "";
+	const render = (text: string): string =>
+		text.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (match, key: string) =>
+			state[key] === undefined ? match : String(state[key]),
+		);
+	return { to: render(declared), body: render(body) };
+}
+
 /** The content `configure` writes for `config/logger.ts`. */
 async function generatedConfig(): Promise<string> {
 	const files: Array<{ path: string; content: string }> = [];
@@ -19,6 +42,11 @@ async function generatedConfig(): Promise<string> {
 		async addEnvVars() {},
 		async writeFile(filePath, content) {
 			files.push({ path: filePath, content });
+		},
+		async makeUsingStub(stubsRoot, stubPath, state = {}) {
+			const { to, body } = renderStub(stubsRoot, stubPath, state);
+			files.push({ path: to, content: body });
+			return { path: to, contents: body };
 		},
 	});
 	const written = files[0];
@@ -71,6 +99,11 @@ describe("spectrum > configure", () => {
 			async addEnvVars() {},
 			async writeFile(path, content) {
 				files.push({ path, content });
+			},
+			async makeUsingStub(stubsRoot, stubPath, state = {}) {
+				const { to, body } = renderStub(stubsRoot, stubPath, state);
+				files.push({ path: to, content: body });
+				return { path: to, contents: body };
 			},
 		});
 
