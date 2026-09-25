@@ -14,6 +14,7 @@
  */
 
 import { format } from "node:util";
+import { emitLog, hasLogListeners } from "./events.js";
 import { parseRedactPath, redactPath } from "./redact.js";
 import { sanitizeLogValue } from "./sanitize.js";
 import { channelsFromTargets } from "./targets.js";
@@ -401,6 +402,10 @@ export class Logger {
 			correlationId: this.#correlationId,
 			timestamp: new Date().toISOString(),
 		};
+
+		// Observers before the channels: a channel that throws falls back to
+		// stderr, and an observer must not be skipped by that path.
+		if (hasLogListeners()) emitLog(entry);
 
 		for (const channel of this.#config.channels ?? []) {
 			try {

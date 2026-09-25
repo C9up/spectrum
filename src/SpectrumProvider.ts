@@ -1,5 +1,6 @@
 import "./augmentations.js";
 import { ConsoleChannel } from "./channels/ConsoleChannel.js";
+import { onLog } from "./events.js";
 import { Logger } from "./Logger.js";
 import { LoggerManager } from "./LoggerManager.js";
 import { clearLogger, getLogger, setLogger } from "./services/main.js";
@@ -11,6 +12,18 @@ import type {
 	LogLevelWithSilent,
 } from "./types.js";
 import { isLogLevelWithSilent, logLevel } from "./types.js";
+
+/** An emitter, as far as this provider is concerned. Structural: no import. */
+function hasEmit(
+	value: unknown,
+): value is { emit(event: string, payload: unknown): unknown } {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		"emit" in value &&
+		typeof value.emit === "function"
+	);
+}
 
 /** A channel that owns a resource (e.g. a FileChannel WriteStream) to release on shutdown. */
 function hasClose(
@@ -80,7 +93,35 @@ export default class SpectrumProvider {
 		const logger = await this.app.container.resolve<Logger>(Logger);
 		this.#owned = logger;
 		setLogger(logger);
+		await this.#bridgeLogEvents();
 	}
+
+	/**
+	 * Bridge spectrum's `onLog` registry onto the app emitter as `log:line`,
+	 * the way atlas bridges its queries as `db:query`.
+	 *
+	 * That is what lets something outside the logger — the debug toolbar's log
+	 * panel — see a line without importing spectrum. No-op when the container
+	 * exposes no `events` emitter; `onLog` stays the way to observe.
+	 */
+	async #bridgeLogEvents(): Promise<void> {
+		let emitter: unknown;
+		try {
+			emitter = await this.app.container.resolve("events");
+		} catch {
+			return; // no emitter bound
+		}
+		if (!hasEmit(emitter)) return;
+		// Idempotent: a boot that failed past this point and retried would
+		// otherwise emit every line twice.
+		this.#logBridge?.();
+		this.#logBridge = onLog((entry) => {
+			emitter.emit("log:line", entry);
+		});
+	}
+
+	/** Unsubscribe for the `onLog` → app-emitter bridge, torn down on shutdown. */
+	#logBridge: (() => void) | undefined;
 
 	/**
 	 * Release channel resources (e.g. FileChannel WriteStreams) on shutdown.
@@ -94,6 +135,8 @@ export default class SpectrumProvider {
 		// Release the module-level singleton first, while it is still ours: past
 		// this point the channels are closing, and a logger reachable through
 		// `services/main` would be writing into streams that have ended.
+		this.#logBridge?.();
+		this.#logBridge = undefined;
 		if (this.#owned !== undefined && getLogger() === this.#owned) clearLogger();
 		this.#owned = undefined;
 		const results = await Promise.allSettled(
