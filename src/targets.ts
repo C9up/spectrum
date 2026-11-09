@@ -126,11 +126,12 @@ class LeveledChannel implements LogChannel {
 
 	/**
 	 * Forwarded because the wrapper is now what the provider holds, and a
-	 * FileChannel that is never closed keeps its stream open past shutdown.
+	 * FileChannel that is never closed keeps its file open past shutdown.
+	 * The inner promise is handed back: dropping it let shutdown resolve
+	 * before any line of a file target was flushed.
 	 */
-	close(): void {
-		const inner: LogChannel & { close?: () => void } = this.#inner;
-		inner.close?.();
+	close(): void | Promise<void> {
+		return this.#inner.close?.();
 	}
 }
 
