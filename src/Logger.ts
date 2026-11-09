@@ -32,7 +32,11 @@ import type {
 	LogLevelWithSilent,
 	LogSerializer,
 } from "./types.js";
-import { LOG_LEVEL_ORDER, levelThreshold } from "./types.js";
+import {
+	isLogLevelWithSilent,
+	LOG_LEVEL_ORDER,
+	levelThreshold,
+} from "./types.js";
 
 export type { LogLevel };
 
@@ -333,11 +337,24 @@ export class Logger {
 	silent(message: string, ...values: unknown[]): void;
 	silent(): void {}
 
-	/** Resolve the numeric threshold for this logger + module. */
+	/**
+	 * Resolve the numeric threshold for this logger + module.
+	 *
+	 * Only an OWN entry of `modules` overrides: bracket access answered for
+	 * `constructor`, `toString` or `__proto__` with an inherited function, which
+	 * is no level, and the fallback put such a module at `info` under a logger
+	 * configured for `error`. Without an override a module is at the logger's
+	 * own level — never at one more verbose than configured.
+	 */
 	#threshold(): number {
-		const raw = this.#config.modules?.[this.#module] ?? this.level;
+		const modules = this.#config.modules;
+		const override =
+			modules !== undefined && Object.hasOwn(modules, this.#module)
+				? modules[this.#module]
+				: undefined;
+		const raw = isLogLevelWithSilent(override) ? override : this.level;
 		if (raw === "silent") return levelThreshold("silent");
-		if (typeof raw === "string" && isLogLevel(raw)) return LOG_LEVEL_ORDER[raw];
+		if (isLogLevel(raw)) return LOG_LEVEL_ORDER[raw];
 		return LOG_LEVEL_ORDER.info;
 	}
 
