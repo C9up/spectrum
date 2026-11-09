@@ -53,7 +53,7 @@ function isMergeableObject(value: unknown): value is Record<string, unknown> {
 	);
 }
 
-/** How far down a `cause` chain to follow before calling it a cycle. */
+/** How far down a chain of nested errors to follow. */
 const MAX_CAUSE_DEPTH = 8;
 
 /**
@@ -64,17 +64,25 @@ const MAX_CAUSE_DEPTH = 8;
  * `err.code` is usually the one field a log search is keyed on, and the `cause`
  * of a wrapped error is the half that says what actually failed — both were
  * dropped, silently, by a serializer whose job is to keep them.
+ *
+ * `path` holds the errors being serialized above this one. An error met again
+ * on its own path is a cycle and is written as `"[Circular]"`, as upstream
+ * skips an error it has already tagged; without it `err.self = err` was copied
+ * down to the depth limit, and an error with k such references cost k^8 copies
+ * on the logging call. An error shared by two branches is not a cycle and is
+ * written in both.
  */
-function serializeError(value: unknown, depth = 0): unknown {
+function serializeError(value: unknown, path: readonly Error[] = []): unknown {
 	if (!(value instanceof Error)) return value;
+	if (path.includes(value)) return "[Circular]";
+	if (path.length > MAX_CAUSE_DEPTH) return "[cause chain too deep]";
+	const below = [...path, value];
 
 	// Own ENUMERABLE properties only, which on an Error means the ones it was
 	// given: `message`, `stack` and `name` are not among them.
 	const out: Record<string, unknown> = { ...value };
 	for (const [key, nested] of Object.entries(out)) {
-		if (nested instanceof Error && depth < MAX_CAUSE_DEPTH) {
-			out[key] = serializeError(nested, depth + 1);
-		}
+		if (nested instanceof Error) out[key] = serializeError(nested, below);
 	}
 
 	// Upstream reads the constructor rather than `name`, so a subclass that
@@ -87,15 +95,12 @@ function serializeError(value: unknown, depth = 0): unknown {
 	out.message = value.message;
 	out.stack = value.stack;
 	if (value instanceof AggregateError && Array.isArray(value.errors)) {
-		out.aggregateErrors = value.errors.map((each) =>
-			depth < MAX_CAUSE_DEPTH ? serializeError(each, depth + 1) : String(each),
+		out.aggregateErrors = value.errors.map((each: unknown) =>
+			serializeError(each, below),
 		);
 	}
 	if (value.cause !== undefined) {
-		out.cause =
-			depth < MAX_CAUSE_DEPTH
-				? serializeError(value.cause, depth + 1)
-				: "[cause chain too deep]";
+		out.cause = serializeError(value.cause, below);
 	}
 	return out;
 }
