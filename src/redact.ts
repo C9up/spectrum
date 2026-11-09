@@ -62,7 +62,7 @@ export function redactPath(
 			? censor
 			: redactPath(current, tokens, censor, depth + 1);
 		if (next === current) continue;
-		if (!copy) copy = Array.isArray(node) ? [...node] : { ...node };
+		if (!copy) copy = Array.isArray(node) ? [...node] : copyObject(node);
 		writeKey(copy, key, next);
 	}
 	return copy ?? node;
@@ -81,6 +81,29 @@ function selectKeys(node: object, segment: string): string[] {
 	return Object.hasOwn(node, segment) ? [segment] : [];
 }
 
+/**
+ * A shallow copy that is still what the original was.
+ *
+ * A spread made a plain object: the class prototype went, and its `toJSON`
+ * with it, so a model whose serialization hides its password hash wrote every
+ * field the moment a redaction path matched inside it. Keeping the prototype
+ * is what upstream's redactor does. Values are defined, not assigned, so a
+ * setter on the prototype is not run against the copy.
+ */
+function copyObject(node: object): Record<string, unknown> {
+	const copy: Record<string, unknown> = {};
+	Reflect.setPrototypeOf(copy, Reflect.getPrototypeOf(node));
+	for (const key of Object.keys(node)) {
+		Object.defineProperty(copy, key, {
+			value: readKey(node, key),
+			enumerable: true,
+			writable: true,
+			configurable: true,
+		});
+	}
+	return copy;
+}
+
 function readKey(node: object, key: string): unknown {
 	const own = Object.getOwnPropertyDescriptor(node, key);
 	return own === undefined ? undefined : own.value;
@@ -96,5 +119,10 @@ function writeKey(
 		if (Number.isInteger(index)) node[index] = value;
 		return;
 	}
-	node[key] = value;
+	Object.defineProperty(node, key, {
+		value,
+		enumerable: true,
+		writable: true,
+		configurable: true,
+	});
 }
