@@ -5,10 +5,29 @@
  * through the Spectrum Logger so both Rust and TS logs appear in
  * the same stream with the same format.
  *
+ * Every stderr write in the process goes through the bridge, not only the
+ * Rust crates' — `console.error`, a child process, a library echoing request
+ * data. So a line is claimed only when its module is on an allow-list
+ * (`ream-*` by default), it is written through the Logger (its level,
+ * `enabled`, serializers and redaction apply) and it carries
+ * `source: 'rust'`. Before that, any `[FATAL anything] text` that reached
+ * stderr became a genuine-looking structured entry.
+ *
  * @implements FR55
  */
 
-import type { LogChannel, LogEntry, LogLevel } from "./types.js";
+import type { Logger } from "./Logger.js";
+import type { LogEntry, LogLevel } from "./types.js";
+
+export interface RustLogBridgeOptions {
+	/**
+	 * Modules (after `_` → `-`) the bridge claims. Anything else passes
+	 * through to stderr as text. Default `/^ream-/`.
+	 */
+	modules?: RegExp;
+}
+
+const DEFAULT_MODULES = /^ream-/;
 
 /**
  * Parse a Rust log line into a Spectrum LogEntry.
@@ -50,18 +69,6 @@ export function parseRustLog(line: string): LogEntry | null {
 	};
 }
 
-/**
- * Create a bridge that captures stderr and routes Rust logs to Spectrum channels.
- *
- * Usage — pass the same channels array you built the Logger with (Logger.config
- * is private, so reuse the array rather than reaching into the instance):
- *   const channels = [new ConsoleChannel('pretty')]
- *   const logger = new Logger({ level: 'info', channels })
- *   const bridge = createRustLogBridge(channels)
- *   bridge.start()
- *   // ... Rust crates emit to stderr
- *   bridge.stop()
- */
 /**
  * `process.stderr.write` exactly as it was found, so `stop()` puts THAT back.
  *
@@ -117,11 +124,38 @@ function passThrough(
 	return write.call(process.stderr, chunk, encoding, done);
 }
 
-export function createRustLogBridge(channels: LogChannel[]): {
+/**
+ * Create a bridge that captures stderr and routes Rust logs through `logger`.
+ *
+ *   const logger = new Logger({ level: 'info', channels: [new ConsoleChannel('pretty')] })
+ *   const bridge = createRustLogBridge(logger)
+ *   bridge.start()
+ *   // ... Rust crates emit to stderr
+ *   bridge.stop()
+ */
+export function createRustLogBridge(
+	logger: Logger,
+	options: RustLogBridgeOptions = {},
+): {
 	start: () => void;
 	stop: () => void;
 } {
+	const modules = options.modules ?? DEFAULT_MODULES;
 	let bridgingDepth = 0;
+
+	/** A claimed line, through the logger, its own writes passed straight on. */
+	const emit = (entry: LogEntry): void => {
+		bridgingDepth++;
+		try {
+			logger
+				.child({ module: entry.module, source: "rust" })
+				.log(entry.level, entry.message);
+		} catch {
+			// The bridge must never break a stderr write.
+		} finally {
+			bridgingDepth--;
+		}
+	};
 
 	const bridge = {
 		start() {
@@ -164,13 +198,11 @@ export function createRustLogBridge(channels: LogChannel[]): {
 				const str =
 					typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
 				let hadRustLog = false;
-				// Rebuild passthrough as one byte-faithful string instead of
-				// re-emitting each line with an appended "\n". split("\n") drops
-				// the separator, so every segment except a trailing fragment (the
+				// Rebuild passthrough byte-faithfully: split("\n") drops the
+				// separator, so every segment except a trailing fragment (the
 				// chunk didn't end in "\n") was newline-terminated originally —
-				// reattach accordingly. This preserves blank lines and a partial
-				// no-newline trailing write verbatim, and keeps passthrough lines
-				// in their original order.
+				// reattach accordingly. Text ahead of a claimed line is written
+				// before it, so the order a reader sees is the order written.
 				let passthrough = "";
 				const segments = str.split("\n");
 				for (let i = 0; i < segments.length; i++) {
@@ -180,20 +212,17 @@ export function createRustLogBridge(channels: LogChannel[]): {
 					const trimmed = seg.trim();
 					// Only a complete, non-empty line is a Rust-log candidate. A
 					// trailing fragment is a partial write — never parse or drop it.
-					const entry =
+					const parsed =
 						trimmed && !isTrailingFragment ? parseRustLog(trimmed) : null;
+					const entry =
+						parsed !== null && modules.test(parsed.module) ? parsed : null;
 					if (entry) {
 						hadRustLog = true;
-						for (const channel of channels) {
-							bridgingDepth++;
-							try {
-								channel.write(entry);
-							} catch {
-								/* ignore */
-							} finally {
-								bridgingDepth--;
-							}
+						if (passthrough) {
+							passThrough(origWrite, passthrough, undefined, undefined);
+							passthrough = "";
 						}
+						emit(entry);
 					} else {
 						passthrough += original;
 					}

@@ -4,6 +4,7 @@
  * it is there to catch.
  */
 import { afterEach, describe, expect, it } from "vitest";
+import { Logger } from "../../src/Logger.js";
 import { createRustLogBridge, parseRustLog } from "../../src/RustLogBridge.js";
 import type { LogChannel, LogEntry } from "../../src/types.js";
 
@@ -25,7 +26,10 @@ let restoreStderr: (() => void) | undefined;
  * bridge passes through lands in the array instead of the terminal, and what it
  * intercepts can be told apart from what it did not.
  */
-function bridging(channels: LogChannel[]): string[] {
+function bridging(
+	channels: LogChannel[],
+	options: { modules?: RegExp } = {},
+): string[] {
 	const passedThrough: string[] = [];
 	const original = process.stderr.write;
 	type WriteCallback = (error?: Error | null) => void;
@@ -48,7 +52,10 @@ function bridging(channels: LogChannel[]): string[] {
 		process.stderr.write = original;
 	};
 
-	const bridge = createRustLogBridge(channels);
+	const bridge = createRustLogBridge(
+		new Logger({ level: "trace", channels }),
+		options,
+	);
 	started.push(bridge);
 	bridge.start();
 	return passedThrough;
@@ -135,10 +142,90 @@ describe("spectrum > the stderr callback", () => {
 describe("spectrum > stopping the bridge", () => {
 	it("puts the original write back", () => {
 		const before = process.stderr.write;
-		const bridge = createRustLogBridge([new Capture()]);
+		const bridge = createRustLogBridge(
+			new Logger({ level: "info", channels: [new Capture()] }),
+		);
 		bridge.start();
 		expect(process.stderr.write).not.toBe(before);
 		bridge.stop();
 		expect(process.stderr.write).toBe(before);
+	});
+});
+
+describe("spectrum > what the bridge claims", () => {
+	it("passes a line from a module outside the allow-list through as text", () => {
+		const channel = new Capture();
+		const passedThrough = bridging([channel]);
+		process.stderr.write(
+			"login failed for bad login\n[FATAL ream_auth_forged] x\n[FATAL auth] admin password reset by attacker\n",
+		);
+		expect(channel.entries.map((entry) => entry.module)).toEqual([
+			"ream-auth-forged",
+		]);
+		expect(passedThrough.join("")).toContain(
+			"[FATAL auth] admin password reset by attacker\n",
+		);
+	});
+
+	it("marks bridged entries as coming from Rust", () => {
+		const channel = new Capture();
+		bridging([channel]);
+		process.stderr.write("[WARN ream_bus] slow dispatch\n");
+		expect(channel.entries[0]).toMatchObject({
+			level: "warn",
+			module: "ream-bus",
+			message: "slow dispatch",
+			source: "rust",
+		});
+	});
+
+	it("honours the logger's level and enabled flag", () => {
+		const channel = new Capture();
+		const original = process.stderr.write;
+		process.stderr.write = (): boolean => true;
+		restoreStderr = () => {
+			process.stderr.write = original;
+		};
+		const quiet = createRustLogBridge(
+			new Logger({ level: "error", channels: [channel] }),
+		);
+		started.push(quiet);
+		quiet.start();
+		process.stderr.write("[INFO ream_http] below the level\n");
+		process.stderr.write("[ERROR ream_http] at the level\n");
+		quiet.stop();
+		const off = createRustLogBridge(
+			new Logger({ enabled: false, level: "trace", channels: [channel] }),
+		);
+		started.push(off);
+		off.start();
+		process.stderr.write("[ERROR ream_http] logger disabled\n");
+		expect(channel.entries.map((entry) => entry.message)).toEqual([
+			"at the level",
+		]);
+	});
+
+	it("keeps the order of the text around a bridged line", () => {
+		// The channel writes into the same list stderr's passthrough lands in,
+		// so the list is the order a reader of the terminal would see.
+		let sequence: string[] = [];
+		const ordered: LogChannel = {
+			name: "ordered",
+			write(entry) {
+				sequence.push(`entry:${entry.message}`);
+			},
+		};
+		sequence = bridging([ordered]);
+		process.stderr.write("before\n[WARN ream_bus] bridged\nafter\n");
+		expect(sequence).toEqual(["before\n", "entry:bridged", "after\n"]);
+	});
+
+	it("widens the allow-list on request", () => {
+		const channel = new Capture();
+		bridging([channel], { modules: /^(ream|atlas)-/ });
+		process.stderr.write("[INFO atlas_query] compiled\n");
+		expect(channel.entries.map((entry) => entry.module)).toEqual([
+			"atlas-query",
+		]);
 	});
 });

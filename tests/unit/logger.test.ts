@@ -183,7 +183,9 @@ describe("logger > RustLogBridge", () => {
 				},
 			};
 
-			const bridge = createRustLogBridge([channel]);
+			const bridge = createRustLogBridge(
+				new Logger({ level: "trace", channels: [channel] }),
+			);
 			bridge.start();
 			process.stderr.write("[ERROR ream_http] root error\n");
 			bridge.stop();

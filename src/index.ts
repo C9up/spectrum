@@ -17,7 +17,11 @@ export { SpectrumError } from "./errors.js";
 export { clearLogListeners, type LogListener, onLog } from "./events.js";
 export { Logger, type LogLevel } from "./Logger.js";
 export { LoggerManager } from "./LoggerManager.js";
-export { createRustLogBridge, parseRustLog } from "./RustLogBridge.js";
+export {
+	createRustLogBridge,
+	parseRustLog,
+	type RustLogBridgeOptions,
+} from "./RustLogBridge.js";
 export type {
 	FileTargetOptions,
 	PrettyTargetOptions,
