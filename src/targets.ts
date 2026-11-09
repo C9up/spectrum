@@ -24,9 +24,15 @@ import {
 	levelThreshold,
 } from "./types.js";
 
-/** One transport entry (AdonisJS `TransportTargetOptions`). */
+/**
+ * One transport entry (AdonisJS `TransportTargetOptions`).
+ *
+ * `target` names `pino-pretty` or `pino/file`, or is a {@link LogChannel}:
+ * a destination spectrum has no built-in channel for is plugged in that way,
+ * with the target's own level.
+ */
 export interface TransportTargetOptions {
-	target: string;
+	target: string | LogChannel;
 	options?: Record<string, unknown>;
 	level?: LogLevelWithSilent | string;
 }
@@ -34,13 +40,20 @@ export interface TransportTargetOptions {
 /** Options `targets.file()` accepts. `destination` is a path, or an fd. */
 export interface FileTargetOptions {
 	destination?: string | number;
+	/** `false` starts the file over instead of appending. Default true. */
+	append?: boolean;
 	maxSizeBytes?: number;
 	maxFiles?: number;
+	maxBufferBytes?: number;
 	[key: string]: unknown;
 }
 
-/** Options `targets.pretty()` accepts (pino-pretty's, which we ignore). */
+/**
+ * Options `targets.pretty()` accepts. `destination` (1 or 2) sends every
+ * level to that stream; pino-pretty's formatting options are not read.
+ */
 export interface PrettyTargetOptions {
+	destination?: number;
 	[key: string]: unknown;
 }
 
@@ -190,32 +203,79 @@ export function channelsFromTargets(
 	list: readonly TransportTargetOptions[],
 	inheritedLevel?: LogLevelWithSilent | string,
 ): LogChannel[] {
-	const channels: LogChannel[] = [];
-	for (const entry of list) {
-		const level = entry.level ?? inheritedLevel;
-		if (entry.target === "pino-pretty") {
-			channels.push(atLevel(new ConsoleChannel("pretty"), level));
-			continue;
-		}
-		const destination = entry.options?.destination;
-		if (typeof destination === "string") {
-			channels.push(
-				atLevel(
-					new FileChannel({
-						path: destination,
-						...(typeof entry.options?.maxSizeBytes === "number"
-							? { maxSizeBytes: entry.options.maxSizeBytes }
-							: {}),
-						...(typeof entry.options?.maxFiles === "number"
-							? { maxFiles: entry.options.maxFiles }
-							: {}),
-					}),
-					level,
-				),
-			);
-			continue;
-		}
-		channels.push(atLevel(descriptorChannel(destination), level));
+	return list.map((entry) =>
+		atLevel(channelForTarget(entry), entry.level ?? inheritedLevel),
+	);
+}
+
+/**
+ * The channel a target describes.
+ *
+ * Any other target name used to fall through to JSON on stdout, so a config
+ * shipping logs to Loki or a socket booted fine and nothing reached the sink.
+ * Upstream fails when it cannot load a target; so does this.
+ */
+function channelForTarget(entry: TransportTargetOptions): LogChannel {
+	const { target } = entry;
+	const options = entry.options ?? {};
+	if (typeof target !== "string") return target;
+	if (target === "pino-pretty") return prettyChannel(options.destination);
+	if (target === "pino/file") {
+		const destination = options.destination;
+		if (typeof destination !== "string") return descriptorChannel(destination);
+		return new FileChannel({
+			path: destination,
+			append: optionalBoolean(options, "append"),
+			maxSizeBytes: optionalNumber(options, "maxSizeBytes"),
+			maxFiles: optionalNumber(options, "maxFiles"),
+			maxBufferBytes: optionalNumber(options, "maxBufferBytes"),
+		});
 	}
-	return channels;
+	throw new SpectrumError(
+		"E_SPECTRUM_UNSUPPORTED_TARGET",
+		`Transport target "${target}" is not supported: spectrum builds "pino-pretty" and "pino/file". Pass a LogChannel as the target to write anywhere else.`,
+	);
+}
+
+function prettyChannel(destination: unknown): LogChannel {
+	if (destination === undefined) return new ConsoleChannel("pretty");
+	if (destination === 1)
+		return new ConsoleChannel("pretty", { stream: "stdout" });
+	if (destination === 2)
+		return new ConsoleChannel("pretty", { stream: "stderr" });
+	throw new SpectrumError(
+		"E_SPECTRUM_UNSUPPORTED_TARGET",
+		`pino-pretty destination ${JSON.stringify(destination)} is not supported: use 1 or 2, or a pino/file target for a file.`,
+	);
+}
+
+/** A number option, or undefined when absent; any other type is a config error. */
+function optionalNumber(
+	options: Record<string, unknown>,
+	key: string,
+): number | undefined {
+	const value = options[key];
+	if (value === undefined || typeof value === "number") return value;
+	throw invalidOption(key, "number", value);
+}
+
+/** A boolean option, or undefined when absent; any other type is a config error. */
+function optionalBoolean(
+	options: Record<string, unknown>,
+	key: string,
+): boolean | undefined {
+	const value = options[key];
+	if (value === undefined || typeof value === "boolean") return value;
+	throw invalidOption(key, "boolean", value);
+}
+
+function invalidOption(
+	key: string,
+	type: string,
+	value: unknown,
+): SpectrumError {
+	return new SpectrumError(
+		"E_SPECTRUM_INVALID_FILE_OPTIONS",
+		`pino/file option ${key} must be a ${type}, got ${typeof value}`,
+	);
 }

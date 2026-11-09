@@ -32,6 +32,8 @@ export interface FileChannelConfig {
 	 * the channel did not open it.
 	 */
 	fd?: number;
+	/** `false` starts the file over on first open instead of appending. Default true. */
+	append?: boolean;
 	/** Rotate before the live file would grow past this. Default 10 MiB. */
 	maxSizeBytes?: number;
 	/** Files kept, the live one included. Default 5. */
@@ -76,6 +78,8 @@ export class FileChannel implements LogChannel {
 	readonly #filePath: string;
 	/** Whether `#fd` was handed in rather than opened here. */
 	readonly #fdGiven: boolean;
+	/** Truncate on the next open: `append: false`, until the first open. */
+	#truncate: boolean;
 	readonly #maxSize: number;
 	readonly #maxFiles: number;
 	readonly #maxBuffer: number;
@@ -116,6 +120,7 @@ export class FileChannel implements LogChannel {
 		}
 		this.#filePath = filePath ?? `fd ${String(fd)}`;
 		this.#fdGiven = fd !== undefined;
+		this.#truncate = config.append === false;
 		if (fd !== undefined) this.#fd = fd;
 		// Checked here, not trusted: -1 rotated on every line and deleted the
 		// log, and NaN (an unset env var through Number()) never rotated at all.
@@ -204,7 +209,8 @@ export class FileChannel implements LogChannel {
 	async #open(): Promise<boolean> {
 		try {
 			await fsp.mkdir(path.dirname(this.#filePath), { recursive: true });
-			const fd = await openFd(this.#filePath, "a");
+			const fd = await openFd(this.#filePath, this.#truncate ? "w" : "a");
+			this.#truncate = false;
 			try {
 				this.#currentSize = (await fstatFd(fd)).size;
 			} catch {
@@ -319,6 +325,7 @@ export class FileChannel implements LogChannel {
 					fs.constants.O_WRONLY |
 						fs.constants.O_APPEND |
 						fs.constants.O_CREAT |
+						(this.#truncate ? fs.constants.O_TRUNC : 0) |
 						(fs.constants.O_NONBLOCK ?? 0),
 					0o666,
 				);
