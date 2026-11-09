@@ -96,3 +96,39 @@ describe("spectrum > redaction keeps what the redacted object is", () => {
 		expect(user.apiToken).toBe("tok_live");
 	});
 });
+
+describe("spectrum > redaction through accessors", () => {
+	function withHeaders(): Record<string, unknown> {
+		const req: Record<string, unknown> = { id: 1 };
+		Object.defineProperty(req, "headers", {
+			enumerable: true,
+			get: () => ({ authorization: "Bearer SECRET", accept: "*/*" }),
+		});
+		return req;
+	}
+
+	it("censors a secret reached through an own getter", () => {
+		const out = line(["req.headers.authorization"], { req: withHeaders() });
+		expect(out).not.toContain("SECRET");
+		expect(out).toContain('"authorization":"[Redacted]"');
+		expect(out).toContain('"accept":"*/*"');
+	});
+
+	it("censors a getter-backed value named by the last segment", () => {
+		const out = line(["req.headers"], { req: withHeaders() });
+		expect(out).not.toContain("SECRET");
+		expect(out).toContain('"headers":"[Redacted]"');
+	});
+
+	it("keeps the line when a getter on the path throws", () => {
+		const req: Record<string, unknown> = { id: 1 };
+		Object.defineProperty(req, "headers", {
+			enumerable: true,
+			get: () => {
+				throw new Error("no");
+			},
+		});
+		const out = line(["req.headers.authorization"], { req, kept: true });
+		expect(out).toContain('"kept":true');
+	});
+});

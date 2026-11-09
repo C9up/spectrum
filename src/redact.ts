@@ -104,9 +104,21 @@ function copyObject(node: object): Record<string, unknown> {
 	return copy;
 }
 
+/**
+ * An own key's value, getter included.
+ *
+ * Reading the descriptor's `value` answered `undefined` for an accessor, so
+ * the walk stopped there while the line, written later, ran the getter and
+ * printed the secret behind it in clear. Upstream reads `source[key]`; so does
+ * this. A getter that throws cannot be written either, and is not allowed to
+ * take the line down with it.
+ */
 function readKey(node: object, key: string): unknown {
-	const own = Object.getOwnPropertyDescriptor(node, key);
-	return own === undefined ? undefined : own.value;
+	try {
+		return Reflect.get(node, key);
+	} catch {
+		return "[unreadable]";
+	}
 }
 
 function writeKey(
