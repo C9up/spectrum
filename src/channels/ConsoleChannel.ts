@@ -9,12 +9,25 @@ import { stringifyLimitsFor, stringifyRecord } from "../stringify.js";
 import type { LogChannel, LogEntry } from "../types.js";
 import { logEntryExtras } from "../types.js";
 
+export interface ConsoleChannelOptions {
+	/**
+	 * Write every level to this one stream. Without it, error and fatal go to
+	 * stderr and the rest to stdout.
+	 */
+	stream?: "stdout" | "stderr";
+}
+
 export class ConsoleChannel implements LogChannel {
 	name = "console";
 	#format: "pretty" | "json";
+	readonly #stream: "stdout" | "stderr" | undefined;
 
-	constructor(format: "pretty" | "json" = "pretty") {
+	constructor(
+		format: "pretty" | "json" = "pretty",
+		options: ConsoleChannelOptions = {},
+	) {
 		this.#format = format;
+		this.#stream = options.stream;
 	}
 
 	write(entry: LogEntry): void {
@@ -79,9 +92,15 @@ export class ConsoleChannel implements LogChannel {
 		);
 	}
 
-	/** Route error/fatal to stderr, others to stdout. */
+	/** The configured stream, else error/fatal to stderr and others to stdout. */
 	#writeToStream(level: string, output: string): void {
-		if (level === "error" || level === "fatal") {
+		if (this.#stream === "stdout") {
+			process.stdout.write(output);
+		} else if (
+			this.#stream === "stderr" ||
+			level === "error" ||
+			level === "fatal"
+		) {
 			process.stderr.write(output);
 		} else {
 			process.stdout.write(output);

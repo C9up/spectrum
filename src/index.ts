@@ -6,8 +6,11 @@
 
 import "./augmentations.js";
 
-export { ConsoleChannel } from "./channels/ConsoleChannel.js";
-export { FileChannel } from "./channels/FileChannel.js";
+export {
+	ConsoleChannel,
+	type ConsoleChannelOptions,
+} from "./channels/ConsoleChannel.js";
+export { FileChannel, type FileChannelConfig } from "./channels/FileChannel.js";
 export { defineConfig } from "./config.js";
 export { configure } from "./configure.js";
 export { SpectrumError } from "./errors.js";

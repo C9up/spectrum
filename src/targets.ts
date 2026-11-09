@@ -154,12 +154,32 @@ function atLevel(channel: LogChannel, level: string | undefined): LogChannel {
 }
 
 /**
+ * JSON to a file descriptor, every level to that one descriptor, as pino's
+ * file target writes it. Splitting by level sent a `destination: 1` app's
+ * errors to stderr, where a collector reading stdout never saw them, and
+ * ignored any other descriptor. No destination means 1, as upstream.
+ */
+function descriptorChannel(destination: unknown): LogChannel {
+	if (destination === undefined || destination === 1) {
+		return new ConsoleChannel("json", { stream: "stdout" });
+	}
+	if (destination === 2)
+		return new ConsoleChannel("json", { stream: "stderr" });
+	if (typeof destination === "number")
+		return new FileChannel({ fd: destination });
+	throw new SpectrumError(
+		"E_SPECTRUM_INVALID_FILE_OPTIONS",
+		`pino/file destination must be a path or a file descriptor, got ${typeof destination}`,
+	);
+}
+
+/**
  * Turn transport targets into the channels spectrum actually writes through.
  *
  * `pino-pretty` is the human-readable console; `pino/file` writes JSON — to a
- * file when `destination` is a path, and to the console when it is a file
- * descriptor, which is what `destination: 1` means in a containerised app that
- * ships stdout to its log collector.
+ * file when `destination` is a path, and to that descriptor when it is one:
+ * `destination: 1` is stdout, which a containerised app ships to its log
+ * collector.
  *
  * A target with no level of its own inherits `inheritedLevel`, the level of the
  * logger it belongs to — upstream's `defineConfig` fills the same gap, by
@@ -195,9 +215,7 @@ export function channelsFromTargets(
 			);
 			continue;
 		}
-		// A descriptor (or nothing) means the process's own output, as JSON —
-		// the shape a log collector parses.
-		channels.push(atLevel(new ConsoleChannel("json"), level));
+		channels.push(atLevel(descriptorChannel(destination), level));
 	}
 	return channels;
 }

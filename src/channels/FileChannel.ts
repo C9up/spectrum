@@ -24,7 +24,14 @@ import { stringifyLimitsFor, stringifyRecord } from "../stringify.js";
 import type { LogChannel, LogEntry } from "../types.js";
 
 export interface FileChannelConfig {
-	path: string;
+	/** The file to append to (created, with its directory, if missing). */
+	path?: string;
+	/**
+	 * An already-open descriptor to write to instead of a path — what a
+	 * `destination: 3` target names. Never rotated, and left open on close:
+	 * the channel did not open it.
+	 */
+	fd?: number;
 	/** Rotate before the live file would grow past this. Default 10 MiB. */
 	maxSizeBytes?: number;
 	/** Files kept, the live one included. Default 5. */
@@ -67,6 +74,8 @@ function positiveInteger(
 export class FileChannel implements LogChannel {
 	name = "file";
 	readonly #filePath: string;
+	/** Whether `#fd` was handed in rather than opened here. */
+	readonly #fdGiven: boolean;
 	readonly #maxSize: number;
 	readonly #maxFiles: number;
 	readonly #maxBuffer: number;
@@ -92,7 +101,22 @@ export class FileChannel implements LogChannel {
 	readonly #ref = new WeakRef(this);
 
 	constructor(config: FileChannelConfig) {
-		this.#filePath = config.path;
+		const { path: filePath, fd } = config;
+		if ((filePath === undefined) === (fd === undefined)) {
+			throw new SpectrumError(
+				"E_SPECTRUM_INVALID_FILE_OPTIONS",
+				"FileChannel needs exactly one of `path` and `fd`",
+			);
+		}
+		if (fd !== undefined && !(Number.isInteger(fd) && fd >= 0)) {
+			throw new SpectrumError(
+				"E_SPECTRUM_INVALID_FILE_OPTIONS",
+				`FileChannel fd must be a non-negative integer, got ${String(fd)}`,
+			);
+		}
+		this.#filePath = filePath ?? `fd ${String(fd)}`;
+		this.#fdGiven = fd !== undefined;
+		if (fd !== undefined) this.#fd = fd;
 		// Checked here, not trusted: -1 rotated on every line and deleted the
 		// log, and NaN (an unset env var through Number()) never rotated at all.
 		this.#maxSize = positiveInteger(
@@ -165,7 +189,8 @@ export class FileChannel implements LogChannel {
 			const head = this.#queue[0];
 			if (head === undefined) break;
 			const size = this.#currentSize + bytes;
-			const overflows = size > 0 && size + head.bytes > this.#maxSize;
+			const overflows =
+				!this.#fdGiven && size > 0 && size + head.bytes > this.#maxSize;
 			if (overflows && !this.#skipRotation) break;
 			if (bytes > 0 && bytes + head.bytes > CHUNK_BYTES) break;
 			this.#queue.shift();
@@ -331,7 +356,9 @@ export class FileChannel implements LogChannel {
 		while (this.#pump !== null) await this.#pump;
 		const fd = this.#fd;
 		this.#fd = null;
-		if (fd !== null) await closeFd(fd).catch(() => undefined);
+		if (fd !== null && !this.#fdGiven) {
+			await closeFd(fd).catch(() => undefined);
+		}
 		FileChannel.#untrack(this.#ref);
 	}
 
