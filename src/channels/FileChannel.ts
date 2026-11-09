@@ -11,6 +11,7 @@
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
+import { stringifyLimitsFor, stringifyRecord } from "../stringify.js";
 import type { LogChannel, LogEntry } from "../types.js";
 
 export interface FileChannelConfig {
@@ -46,7 +47,7 @@ export class FileChannel implements LogChannel {
 
 	write(entry: LogEntry): void {
 		if (this.#closed) return;
-		const line = `${JSON.stringify(entry)}\n`;
+		const line = `${stringifyRecord(entry, stringifyLimitsFor(entry))}\n`;
 		const bytes = Buffer.byteLength(line, "utf8");
 
 		if (this.#rotating) {

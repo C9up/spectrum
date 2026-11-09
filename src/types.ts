@@ -139,6 +139,13 @@ export interface LogConfig {
 	redact?: string[] | RedactOptions;
 	/** Per-key value serializers (`err`/`error` handled by default). */
 	serializers?: Record<string, LogSerializer>;
+	/**
+	 * How deep a value JSON cannot write (a cycle, a BigInt) is walked before
+	 * `"[Object]"` stands in for the rest. Default 5, as pino.
+	 */
+	depthLimit?: number;
+	/** How many entries of one such object or array are written. Default 100, as pino. */
+	edgeLimit?: number;
 }
 
 /**

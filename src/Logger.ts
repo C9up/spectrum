@@ -14,9 +14,16 @@
  */
 
 import { format } from "node:util";
+import { SpectrumError } from "./errors.js";
 import { emitLog, hasLogListeners } from "./events.js";
 import { parseRedactPath, redactPath } from "./redact.js";
 import { sanitizeLogValue } from "./sanitize.js";
+import {
+	attachStringifyLimits,
+	DEFAULT_STRINGIFY_LIMITS,
+	isStringifyLimit,
+	type StringifyLimits,
+} from "./stringify.js";
 import { channelsFromTargets } from "./targets.js";
 import type {
 	LogConfig,
@@ -93,6 +100,27 @@ function serializeError(value: unknown, depth = 0): unknown {
 	return out;
 }
 
+/** The config's stringify limits, checked; `undefined` when both are default. */
+function stringifyLimits(config: LogConfig): StringifyLimits | undefined {
+	const { depthLimit, edgeLimit } = config;
+	if (depthLimit === undefined && edgeLimit === undefined) return undefined;
+	for (const [name, value] of [
+		["depthLimit", depthLimit],
+		["edgeLimit", edgeLimit],
+	] as const) {
+		if (value !== undefined && !isStringifyLimit(value)) {
+			throw new SpectrumError(
+				"E_SPECTRUM_INVALID_STRINGIFY_LIMIT",
+				`${name} must be a positive integer, got ${String(value)}`,
+			);
+		}
+	}
+	return {
+		depthLimit: depthLimit ?? DEFAULT_STRINGIFY_LIMITS.depthLimit,
+		edgeLimit: edgeLimit ?? DEFAULT_STRINGIFY_LIMITS.edgeLimit,
+	};
+}
+
 const DEFAULT_SERIALIZERS: Record<string, LogSerializer> = {
 	err: serializeError,
 	error: serializeError,
@@ -114,6 +142,8 @@ export class Logger {
 	#level?: LogLevelWithSilent;
 	/** `config.redact` compiled once, as pino compiles its redactor once. */
 	readonly #redactPaths: string[][];
+	/** The fallback stringifier's limits, when the config moved them. */
+	readonly #limits: StringifyLimits | undefined;
 
 	constructor(
 		config: LogConfig,
@@ -142,6 +172,7 @@ export class Logger {
 		const paths =
 			redact === undefined ? [] : Array.isArray(redact) ? redact : redact.paths;
 		this.#redactPaths = paths.map(parseRedactPath);
+		this.#limits = stringifyLimits(this.#config);
 	}
 
 	/** Whether the logger is enabled. When false every log call is a no-op. */
@@ -402,6 +433,8 @@ export class Logger {
 			correlationId: this.#correlationId,
 			timestamp: new Date().toISOString(),
 		};
+
+		if (this.#limits !== undefined) attachStringifyLimits(entry, this.#limits);
 
 		// Observers before the channels: a channel that throws falls back to
 		// stderr, and an observer must not be skipped by that path.
