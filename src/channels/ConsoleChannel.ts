@@ -62,12 +62,13 @@ export class ConsoleChannel implements LogChannel {
 			: "";
 		const cid = cidRaw ? ` cid=${this.#sanitize(cidRaw)}` : "";
 		// Prefer legacy `data`; otherwise render the merged root fields. JSON
-		// encoding escapes control chars, so no CRLF can leak into the line.
+		// escapes C0 controls but not DEL, C1 or U+2028/2029, so the rendered
+		// data goes through the same sanitizer as the message.
 		const extras = logEntryExtras(entry);
 		const payload =
 			entry.data ?? (Object.keys(extras).length > 0 ? extras : undefined);
 		const dataStr = payload
-			? ` ${stringifyRecord(payload, stringifyLimitsFor(entry))}`
+			? ` ${this.#sanitize(stringifyRecord(payload, stringifyLimitsFor(entry)))}`
 			: "";
 		const message = this.#sanitize(entry.message);
 		const module = this.#sanitize(entry.module);
