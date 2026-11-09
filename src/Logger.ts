@@ -33,6 +33,7 @@ import type {
 	LogSerializer,
 } from "./types.js";
 import {
+	assertLogLevel,
 	isLogLevelWithSilent,
 	LOG_LEVEL_ORDER,
 	levelThreshold,
@@ -177,6 +178,10 @@ export class Logger {
 		this.#module = module;
 		this.#correlationId = correlationId;
 		this.#bindings = bindings;
+		if (this.#config.level !== undefined) assertLogLevel(this.#config.level);
+		for (const value of Object.values(this.#config.modules ?? {})) {
+			assertLogLevel(value);
+		}
 		this.#redactPaths = redactPathsOf(this.#config.redact);
 		this.#limits = stringifyLimits(this.#config);
 	}
@@ -192,7 +197,7 @@ export class Logger {
 	}
 
 	set level(level: LogLevelWithSilent) {
-		this.#level = level;
+		this.#level = assertLogLevel(level);
 	}
 
 	/** Numeric value of the current level (`silent` → +Infinity). */

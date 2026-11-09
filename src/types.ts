@@ -1,3 +1,4 @@
+import { SpectrumError } from "./errors.js";
 import type { TransportTargetOptions } from "./targets.js";
 /**
  * Spectrum types.
@@ -47,8 +48,24 @@ export function isLogLevelWithSilent(
 }
 
 /**
+ * A configured level, checked.
+ *
+ * An unknown level is a config error, as it is upstream ("unknown level"):
+ * reading `ERROR` or `warning` as `info` meant an operator quieting production
+ * got more output, and no word about it.
+ */
+export function assertLogLevel(value: unknown): LogLevelWithSilent {
+	if (isLogLevelWithSilent(value)) return value;
+	throw new SpectrumError(
+		"E_SPECTRUM_UNKNOWN_LEVEL",
+		`unknown level ${JSON.stringify(value) ?? String(value)}. Use one of: ${[...CONFIGURED_LEVELS].join(", ")}.`,
+	);
+}
+
+/**
  * Narrow an untyped level — `process.env.LOG_LEVEL`, a CLI flag — to one the
- * config can name, falling back to `info`.
+ * config can name. Absent (or empty) falls back to `fallback`; set to
+ * something that is no level, it throws.
  *
  * Without it a config file has to assert the env string into the union, and an
  * assertion is the wrong tool for a value that comes from outside the program:
@@ -58,7 +75,8 @@ export function logLevel(
 	raw: unknown,
 	fallback: LogLevelWithSilent = "info",
 ): LogLevelWithSilent {
-	return isLogLevelWithSilent(raw) ? raw : fallback;
+	if (raw === undefined || raw === "") return fallback;
+	return assertLogLevel(raw);
 }
 
 export interface LogEntry {

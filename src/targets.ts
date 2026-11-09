@@ -16,6 +16,7 @@
 
 import { ConsoleChannel } from "./channels/ConsoleChannel.js";
 import { FileChannel } from "./channels/FileChannel.js";
+import { SpectrumError } from "./errors.js";
 import type { LogChannel, LogEntry, LogLevelWithSilent } from "./types.js";
 import {
 	isLogLevelWithSilent,
@@ -141,8 +142,9 @@ function atLevel(channel: LogChannel, level: string | undefined): LogChannel {
 	if (!isLogLevelWithSilent(level)) {
 		// A level nobody can act on is a config error, and the failure mode of
 		// ignoring it is the destination receiving everything.
-		throw new Error(
-			`[spectrum] Unknown transport target level "${level}". Use one of: ${Object.keys(LOG_LEVEL_ORDER).join(", ")}, silent.`,
+		throw new SpectrumError(
+			"E_SPECTRUM_UNKNOWN_LEVEL",
+			`Unknown transport target level "${level}". Use one of: ${Object.keys(LOG_LEVEL_ORDER).join(", ")}, silent.`,
 		);
 	}
 	const threshold = levelThreshold(level);

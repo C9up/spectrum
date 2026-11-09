@@ -84,11 +84,28 @@ describe("spectrum > SpectrumProvider", () => {
 		expect(logger).toBeInstanceOf(Logger);
 	});
 
-	it("falls back to LOG_LEVEL env var when config.level is invalid", async () => {
-		process.env.LOG_LEVEL = "warn";
+	it("throws on an invalid config.level instead of substituting LOG_LEVEL", () => {
+		process.env.LOG_LEVEL = "debug";
 		const { app } = makeApp({ level: "bogus-level" });
+		expect(() => new SpectrumProvider(app).register()).toThrow(
+			expect.objectContaining({ code: "E_SPECTRUM_UNKNOWN_LEVEL" }),
+		);
+	});
+
+	it("reads LOG_LEVEL when config.level is absent", async () => {
+		process.env.LOG_LEVEL = "warn";
+		const { app } = makeApp({});
 		new SpectrumProvider(app).register();
-		expect(await app.container.resolve(Logger)).toBeInstanceOf(Logger);
+		const logger = await app.container.resolve<Logger>(Logger);
+		expect(logger.level).toBe("warn");
+	});
+
+	it("throws on an invalid LOG_LEVEL when config.level is absent", () => {
+		process.env.LOG_LEVEL = "WARNING";
+		const { app } = makeApp({});
+		expect(() => new SpectrumProvider(app).register()).toThrow(
+			expect.objectContaining({ code: "E_SPECTRUM_UNKNOWN_LEVEL" }),
+		);
 	});
 
 	it("falls back to 'info' when neither config.level nor LOG_LEVEL is valid", async () => {

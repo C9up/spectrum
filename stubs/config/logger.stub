@@ -12,7 +12,7 @@ export default defineConfig({
       enabled: true,
       name: process.env.APP_NAME ?? 'app',
       // LOG_LEVEL comes from outside the program, so it is checked rather than
-      // asserted: anything that is not a level reads as 'info'.
+      // asserted: unset reads as 'info', and a value that is no level throws.
       level: logLevel(process.env.LOG_LEVEL),
       transport: {
         targets: targets()

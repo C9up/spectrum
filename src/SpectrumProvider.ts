@@ -11,7 +11,7 @@ import type {
 	LoggerManagerConfig,
 	LogLevelWithSilent,
 } from "./types.js";
-import { isLogLevelWithSilent, logLevel } from "./types.js";
+import { assertLogLevel, logLevel } from "./types.js";
 
 /** An emitter, as far as this provider is concerned. Structural: no import. */
 function hasEmit(
@@ -189,9 +189,12 @@ export default class SpectrumProvider {
 	}
 
 	#normalizeLogger(cfg: Partial<LogConfig>): LogConfig {
-		const level = isLogLevelWithSilent(cfg.level)
-			? cfg.level
-			: logLevel(process.env.LOG_LEVEL);
+		// An invalid level in the config is a config error, not a cue to take
+		// whatever the environment says instead.
+		const level =
+			cfg.level === undefined
+				? logLevel(process.env.LOG_LEVEL)
+				: assertLogLevel(cfg.level);
 		// An AdonisJS `config/logger.ts` declares its output as
 		// `transport.targets`, not as channels. It has to be converted HERE:
 		// filling `channels` in with the console fallback below is what stopped
