@@ -1,9 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { LogChannel, LogEntry } from "../../src/index.js";
 import { Logger } from "../../src/Logger.js";
-import SpectrumProvider, {
-	type SpectrumAppContext,
-} from "../../src/SpectrumProvider.js";
+import SpectrumProvider from "../../src/SpectrumProvider.js";
+import { makeApp, resolveLogger } from "../helpers/app.js";
 
 /** Narrow away null/undefined without a `!` assertion (which lies to the compiler). */
 function defined<T>(value: T | null | undefined): T {
@@ -20,36 +19,6 @@ class TestChannel implements LogChannel {
 	}
 }
 
-function makeApp(loggerConfig?: unknown): {
-	app: SpectrumAppContext;
-} {
-	const bindings = new Map<unknown, () => unknown>();
-	const cache = new Map<unknown, unknown>();
-	return {
-		app: {
-			container: {
-				singleton(token, factory) {
-					bindings.set(token, factory);
-				},
-				async resolve<T = unknown>(token: unknown): Promise<T> {
-					if (cache.has(token)) return cache.get(token) as T;
-					const factory = bindings.get(token);
-					if (!factory) throw new Error("not registered");
-					const value = await factory();
-					cache.set(token, value);
-					return value as T;
-				},
-			},
-			config: {
-				get<T = unknown>(key: string): T | undefined {
-					if (key === "logger" && loggerConfig) return loggerConfig as T;
-					return undefined;
-				},
-			},
-		},
-	};
-}
-
 describe("spectrum > SpectrumProvider", () => {
 	const originalLevel = process.env.LOG_LEVEL;
 
@@ -59,7 +28,7 @@ describe("spectrum > SpectrumProvider", () => {
 	});
 
 	it("registers Logger and 'logger' string token to the same singleton", async () => {
-		const { app } = makeApp();
+		const app = makeApp();
 		new SpectrumProvider(app).register();
 
 		const byClass = await app.container.resolve(Logger);
@@ -69,7 +38,7 @@ describe("spectrum > SpectrumProvider", () => {
 	});
 
 	it("throws a clear error when `default` references a missing logger (not a crash at first log)", () => {
-		const { app } = makeApp({
+		const app = makeApp({
 			default: "prod",
 			loggers: { app: { level: "info", channels: [new TestChannel()] } },
 		});
@@ -78,7 +47,7 @@ describe("spectrum > SpectrumProvider", () => {
 	});
 
 	it("uses the configured log level when present and valid", async () => {
-		const { app } = makeApp({ level: "debug" });
+		const app = makeApp({ level: "debug" });
 		new SpectrumProvider(app).register();
 		const logger = await app.container.resolve(Logger);
 		expect(logger).toBeInstanceOf(Logger);
@@ -86,7 +55,7 @@ describe("spectrum > SpectrumProvider", () => {
 
 	it("throws on an invalid config.level instead of substituting LOG_LEVEL", () => {
 		process.env.LOG_LEVEL = "debug";
-		const { app } = makeApp({ level: "bogus-level" });
+		const app = makeApp({ level: "bogus-level" });
 		expect(() => new SpectrumProvider(app).register()).toThrow(
 			expect.objectContaining({ code: "E_SPECTRUM_UNKNOWN_LEVEL" }),
 		);
@@ -94,15 +63,15 @@ describe("spectrum > SpectrumProvider", () => {
 
 	it("reads LOG_LEVEL when config.level is absent", async () => {
 		process.env.LOG_LEVEL = "warn";
-		const { app } = makeApp({});
+		const app = makeApp({});
 		new SpectrumProvider(app).register();
-		const logger = await app.container.resolve<Logger>(Logger);
+		const logger = await resolveLogger(app);
 		expect(logger.level).toBe("warn");
 	});
 
 	it("throws on an invalid LOG_LEVEL when config.level is absent", () => {
 		process.env.LOG_LEVEL = "WARNING";
-		const { app } = makeApp({});
+		const app = makeApp({});
 		expect(() => new SpectrumProvider(app).register()).toThrow(
 			expect.objectContaining({ code: "E_SPECTRUM_UNKNOWN_LEVEL" }),
 		);
@@ -110,7 +79,7 @@ describe("spectrum > SpectrumProvider", () => {
 
 	it("falls back to 'info' when neither config.level nor LOG_LEVEL is valid", async () => {
 		delete process.env.LOG_LEVEL;
-		const { app } = makeApp();
+		const app = makeApp();
 		new SpectrumProvider(app).register();
 		expect(await app.container.resolve(Logger)).toBeInstanceOf(Logger);
 	});
@@ -119,13 +88,13 @@ describe("spectrum > SpectrumProvider", () => {
 	// overrides were silently dead. Forwarded now — a module override must apply.
 	it("forwards config.modules so per-module levels work via the provider", async () => {
 		const channel = new TestChannel();
-		const { app } = makeApp({
+		const app = makeApp({
 			level: "error",
 			channels: [channel],
 			modules: { "bus:rust": "warn" },
 		});
 		new SpectrumProvider(app).register();
-		const busLogger = (await app.container.resolve<Logger>(Logger)).child({
+		const busLogger = (await resolveLogger(app)).child({
 			module: "bus:rust",
 		});
 		busLogger.info("dropped — below the base error level");
@@ -143,9 +112,9 @@ describe("spectrum > SpectrumProvider", () => {
 				written.push(entry);
 			},
 		};
-		const { app } = makeApp({ level: "info", channels: [custom] });
+		const app = makeApp({ level: "info", channels: [custom] });
 		new SpectrumProvider(app).register();
-		const logger = await app.container.resolve<Logger>(Logger);
+		const logger = await resolveLogger(app);
 		logger.info("hello");
 		// The configured channel received the entry — proof it's wired, not ignored.
 		expect(written.length).toBe(1);
@@ -160,7 +129,7 @@ describe("spectrum > SpectrumProvider", () => {
 				closed = true;
 			},
 		};
-		const { app } = makeApp({ level: "info", channels: [fileLike] });
+		const app = makeApp({ level: "info", channels: [fileLike] });
 		const provider = new SpectrumProvider(app);
 		provider.register();
 		await provider.shutdown();
@@ -171,7 +140,7 @@ describe("spectrum > SpectrumProvider", () => {
 describe("spectrum > SpectrumProvider > shutdown", () => {
 	it("releases the services/main singleton before closing the channels", async () => {
 		const { getLogger } = await import("../../src/services/main.js");
-		const { app } = makeApp();
+		const app = makeApp();
 		const provider = new SpectrumProvider(app);
 		provider.register();
 		await provider.boot();
@@ -187,11 +156,11 @@ describe("spectrum > SpectrumProvider > shutdown", () => {
 
 	it("leaves a logger another application has since bound alone", async () => {
 		const { getLogger } = await import("../../src/services/main.js");
-		const provider = new SpectrumProvider(makeApp().app);
+		const provider = new SpectrumProvider(makeApp());
 		provider.register();
 		await provider.boot();
 
-		const other = new SpectrumProvider(makeApp().app);
+		const other = new SpectrumProvider(makeApp());
 		other.register();
 		await other.boot();
 		const replacement = getLogger();

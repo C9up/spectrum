@@ -105,12 +105,12 @@ describe("FakeLogger — assertLogged", () => {
 		log.write(makeEntry({ level: "info", data: { userId: 1 } }));
 		expect(() =>
 			log.assertLogged("info", {
-				dataMatches: (d) => (d as { userId: number }).userId === 1,
+				dataMatches: (d) => d?.userId === 1,
 			}),
 		).not.toThrow();
 		expect(() =>
 			log.assertLogged("info", {
-				dataMatches: (d) => (d as { userId: number }).userId === 99,
+				dataMatches: (d) => d?.userId === 99,
 			}),
 		).toThrow(/no captured entry matches/);
 	});

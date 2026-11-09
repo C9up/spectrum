@@ -23,18 +23,18 @@ describe("spectrum > ConsoleChannel", () => {
 	beforeEach(() => {
 		stdout = [];
 		stderr = [];
-		stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(((
-			chunk: unknown,
-		) => {
-			stdout.push(typeof chunk === "string" ? chunk : String(chunk));
-			return true;
-		}) as never);
-		stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((
-			chunk: unknown,
-		) => {
-			stderr.push(typeof chunk === "string" ? chunk : String(chunk));
-			return true;
-		}) as never);
+		stdoutSpy = vi
+			.spyOn(process.stdout, "write")
+			.mockImplementation((chunk: string | Uint8Array) => {
+				stdout.push(typeof chunk === "string" ? chunk : String(chunk));
+				return true;
+			});
+		stderrSpy = vi
+			.spyOn(process.stderr, "write")
+			.mockImplementation((chunk: string | Uint8Array) => {
+				stderr.push(typeof chunk === "string" ? chunk : String(chunk));
+				return true;
+			});
 	});
 
 	afterEach(() => {

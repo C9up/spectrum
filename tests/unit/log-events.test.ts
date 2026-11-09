@@ -13,6 +13,7 @@ import SpectrumProvider, {
 	type SpectrumAppContext,
 } from "../../src/SpectrumProvider.js";
 import type { LogChannel, LogEntry } from "../../src/types.js";
+import { makeApp as baseApp, resolveLogger } from "../helpers/app.js";
 
 class TestChannel implements LogChannel {
 	name = "test";
@@ -24,33 +25,13 @@ class TestChannel implements LogChannel {
 
 /** A container that also holds an emitter, as an application's does. */
 function makeApp(emitter?: unknown): SpectrumAppContext {
-	const bindings = new Map<unknown, () => unknown>();
-	const cache = new Map<unknown, unknown>();
-	if (emitter !== undefined) cache.set("events", emitter);
-	return {
-		container: {
-			singleton(token, factory) {
-				bindings.set(token, factory);
-			},
-			async resolve<T = unknown>(token: unknown): Promise<T> {
-				if (cache.has(token)) return cache.get(token) as T;
-				const factory = bindings.get(token);
-				if (!factory) throw new Error("not registered");
-				const value = await factory();
-				cache.set(token, value);
-				return value as T;
-			},
+	return baseApp(
+		{
+			default: "app",
+			loggers: { app: { level: "info", channels: [new TestChannel()] } },
 		},
-		config: {
-			get<T = unknown>(key: string): T | undefined {
-				if (key !== "logger") return undefined;
-				return {
-					default: "app",
-					loggers: { app: { level: "info", channels: [new TestChannel()] } },
-				} as T;
-			},
-		},
-	};
+		new Map(emitter === undefined ? [] : [["events", emitter]]),
+	);
 }
 
 describe("spectrum > log observers", () => {
@@ -128,7 +109,7 @@ describe("spectrum > log observers", () => {
 		provider.register();
 		await provider.boot();
 
-		const logger = await app.container.resolve<Logger>(Logger);
+		const logger = await resolveLogger(app);
 		logger.info("bridged");
 
 		expect(emitted).toContainEqual([
@@ -145,7 +126,7 @@ describe("spectrum > log observers", () => {
 		const provider = new SpectrumProvider(app);
 		provider.register();
 		await provider.boot();
-		const logger = await app.container.resolve<Logger>(Logger);
+		const logger = await resolveLogger(app);
 		await provider.shutdown();
 
 		logger.info("after shutdown");

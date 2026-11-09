@@ -9,7 +9,7 @@
  */
 
 import type { LogChannel, LogEntry, LogLevel } from "../types.js";
-import { logEntryExtras } from "../types.js";
+import { LOG_LEVEL_ORDER, logEntryExtras } from "../types.js";
 
 export interface FakeLoggerPredicate {
 	/** Substring match against `entry.message`. */
@@ -133,9 +133,9 @@ function safeStringify(value: unknown): string {
 	}
 }
 
-function deepClone<T>(value: T): T {
+function deepClone(entry: LogEntry): LogEntry {
 	try {
-		return structuredClone(value);
+		return structuredClone(entry);
 	} catch {
 		// `data` can carry functions / class instances that structuredClone
 		// rejects (DataCloneError). For a test capture a perfect clone isn't
@@ -144,9 +144,27 @@ function deepClone<T>(value: T): T {
 		// instead of thrown away (the throw propagated into Logger.log's swallow,
 		// dropping the entry and making assertLogged fail with "no entry").
 		try {
-			return JSON.parse(safeStringify(value));
+			const parsed: unknown = JSON.parse(safeStringify(entry));
+			return isLogEntry(parsed) ? parsed : entry;
 		} catch {
-			return value;
+			return entry;
 		}
 	}
+}
+
+/** What came back from the JSON round-trip still has the shape of an entry. */
+function isLogEntry(value: unknown): value is LogEntry {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		"level" in value &&
+		typeof value.level === "string" &&
+		value.level in LOG_LEVEL_ORDER &&
+		"message" in value &&
+		typeof value.message === "string" &&
+		"module" in value &&
+		typeof value.module === "string" &&
+		"timestamp" in value &&
+		typeof value.timestamp === "string"
+	);
 }

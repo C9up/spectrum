@@ -8,32 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import SpectrumProvider from "../../src/SpectrumProvider.js";
-
-/** The slice of a host the provider reads: a container that caches. */
-function host(channels: unknown[]) {
-	const bindings = new Map<unknown, () => unknown>();
-	const built = new Map<unknown, unknown>();
-	return {
-		container: {
-			singleton(token: unknown, factory: () => unknown) {
-				bindings.set(token, factory);
-			},
-			async resolve(token: unknown): Promise<never> {
-				if (!built.has(token)) {
-					const factory = bindings.get(token);
-					if (!factory) throw new Error(`unbound: ${String(token)}`);
-					built.set(token, await factory());
-				}
-				return built.get(token) as never;
-			},
-			has: (token: unknown) => bindings.has(token),
-		},
-		config: {
-			get: (key: string): unknown =>
-				key === "logger" ? { channels } : undefined,
-		},
-	};
-}
+import { makeApp } from "../helpers/app.js";
 
 /** Capture stderr for the duration of one call. */
 async function stderrDuring(run: () => Promise<void>): Promise<string> {
@@ -57,7 +32,7 @@ describe("spectrum > a channel that fails to close", () => {
 			write() {},
 			close: () => Promise.reject(new Error("disk full")),
 		};
-		const provider = new SpectrumProvider(host([failing]) as never);
+		const provider = new SpectrumProvider(makeApp({ channels: [failing] }));
 		provider.register();
 		await provider.boot();
 
@@ -79,7 +54,9 @@ describe("spectrum > a channel that fails to close", () => {
 				closed = true;
 			},
 		};
-		const provider = new SpectrumProvider(host([failing, healthy]) as never);
+		const provider = new SpectrumProvider(
+			makeApp({ channels: [failing, healthy] }),
+		);
 		provider.register();
 		await provider.boot();
 
@@ -90,7 +67,7 @@ describe("spectrum > a channel that fails to close", () => {
 
 	it("says nothing when every channel closes", async () => {
 		const healthy = { write() {}, close: async () => {} };
-		const provider = new SpectrumProvider(host([healthy]) as never);
+		const provider = new SpectrumProvider(makeApp({ channels: [healthy] }));
 		provider.register();
 		await provider.boot();
 

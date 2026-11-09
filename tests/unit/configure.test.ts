@@ -5,11 +5,10 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { configure } from "../../src/configure.js";
-import { Logger } from "../../src/Logger.js";
-import SpectrumProvider, {
-	type SpectrumAppContext,
-} from "../../src/SpectrumProvider.js";
+import type { Logger } from "../../src/Logger.js";
+import SpectrumProvider from "../../src/SpectrumProvider.js";
 import type { LogChannel, LogEntry } from "../../src/types.js";
+import { makeApp, resolveLogger } from "../helpers/app.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -153,35 +152,7 @@ async function loggerFrom(
 		loggers: { app: { ...declared, channels: [channel] } },
 	};
 
-	const bindings = new Map<unknown, () => unknown>();
-	const cache = new Map<unknown, unknown>();
-	const app: SpectrumAppContext = {
-		container: {
-			singleton(token, factory) {
-				bindings.set(token, factory);
-			},
-			async resolve<T = unknown>(token: unknown): Promise<T> {
-				const cached = cache.get(token);
-				if (cached !== undefined) return asType<T>(cached);
-				const factory = bindings.get(token);
-				if (!factory) throw new Error(`not registered: ${String(token)}`);
-				const value = await factory();
-				cache.set(token, value);
-				return asType<T>(value);
-			},
-		},
-		config: {
-			get<T = unknown>(key: string): T | undefined {
-				return key === "logger" ? asType<T>(withChannel) : undefined;
-			},
-		},
-	};
-
+	const app = makeApp(withChannel);
 	new SpectrumProvider(app).register();
-	return app.container.resolve<Logger>(Logger);
-}
-
-/** The container contract is untyped by design; admitted once, here. */
-function asType<T>(value: unknown): T {
-	return value as T;
+	return resolveLogger(app);
 }

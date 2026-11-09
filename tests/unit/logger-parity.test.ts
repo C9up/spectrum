@@ -157,11 +157,9 @@ describe("logger > redact (gap 7)", () => {
 		});
 		const input = { req: { headers: { authorization: "secret", host: "x" } } };
 		logger.info(input, "req");
-		const req = defined(channel.entries[0]).req as {
-			headers: { authorization: string; host: string };
-		};
-		expect(req.headers.authorization).toBe("***");
-		expect(req.headers.host).toBe("x");
+		expect(defined(channel.entries[0]).req).toEqual({
+			headers: { authorization: "***", host: "x" },
+		});
 		// Caller's object must be untouched (copy-on-write).
 		expect(input.req.headers.authorization).toBe("secret");
 	});
@@ -172,12 +170,10 @@ describe("logger > serializers (gap 8)", () => {
 		const channel = new TestChannel();
 		const logger = new Logger({ level: "info", channels: [channel] });
 		logger.info({ err: new Error("bad") }, "failed");
-		const err = defined(channel.entries[0]).err as {
-			message: string;
-			stack: string;
-		};
-		expect(err.message).toBe("bad");
-		expect(typeof err.stack).toBe("string");
+		expect(defined(channel.entries[0]).err).toMatchObject({
+			message: "bad",
+			stack: expect.any(String),
+		});
 	});
 
 	it("applies a configured custom serializer", () => {
@@ -185,7 +181,10 @@ describe("logger > serializers (gap 8)", () => {
 		const logger = new Logger({
 			level: "info",
 			channels: [channel],
-			serializers: { user: (v) => `user:${(v as { id: number }).id}` },
+			serializers: {
+				user: (v) =>
+					`user:${typeof v === "object" && v !== null && "id" in v ? String(v.id) : "?"}`,
+			},
 		});
 		logger.info({ user: { id: 7 } }, "hi");
 		expect(defined(channel.entries[0]).user).toBe("user:7");

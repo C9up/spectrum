@@ -9,45 +9,10 @@ import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { FileChannel } from "../../src/channels/FileChannel.js";
 import { Logger } from "../../src/Logger.js";
-import SpectrumProvider, {
-	type SpectrumAppContext,
-} from "../../src/SpectrumProvider.js";
+import SpectrumProvider from "../../src/SpectrumProvider.js";
 import { channelsFromTargets, targets } from "../../src/targets.js";
 import type { LogChannel, LogEntry } from "../../src/types.js";
-
-function makeApp(loggerConfig: unknown): SpectrumAppContext {
-	const bindings = new Map<unknown, () => unknown>();
-	const cache = new Map<unknown, unknown>();
-	return {
-		container: {
-			singleton(token, factory) {
-				bindings.set(token, factory);
-			},
-			async resolve<T = unknown>(token: unknown): Promise<T> {
-				const cached = cache.get(token);
-				if (cached !== undefined) return asType<T>(cached);
-				const factory = bindings.get(token);
-				if (!factory) throw new Error("not registered");
-				const value = await factory();
-				cache.set(token, value);
-				return asType<T>(value);
-			},
-		},
-		config: {
-			get<T = unknown>(key: string): T | undefined {
-				return key === "logger" ? asType<T>(loggerConfig) : undefined;
-			},
-		},
-	};
-}
-
-/**
- * The container's own contract is untyped by design (a token maps to whatever
- * was bound). This is where that is admitted, once, instead of at every call.
- */
-function asType<T>(value: unknown): T {
-	return value as T;
-}
+import { makeApp, resolveLogger } from "../helpers/app.js";
 
 /** One log entry, for a channel asked what it lets through. */
 function entryAt(level: LogEntry["level"], message: string): LogEntry {
@@ -108,7 +73,7 @@ describe("spectrum > a transport config through the provider", () => {
 		});
 		const provider = new SpectrumProvider(app);
 		provider.register();
-		const logger = await app.container.resolve<Logger>(Logger);
+		const logger = await resolveLogger(app);
 
 		logger.info("to disk");
 		await provider.shutdown();

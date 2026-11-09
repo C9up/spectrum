@@ -165,12 +165,12 @@ describe("logger > RustLogBridge", () => {
 	it("prevents recursive stderr interception when channels write to stderr", () => {
 		const originalWrite = process.stderr.write;
 		const passthrough: string[] = [];
-		process.stderr.write = ((chunk: string | Uint8Array) => {
+		process.stderr.write = (chunk: string | Uint8Array): boolean => {
 			passthrough.push(
 				typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk),
 			);
 			return true;
-		}) as typeof process.stderr.write;
+		};
 
 		try {
 			let writes = 0;
@@ -202,12 +202,12 @@ describe("logger > channel-failure fallback sanitization", () => {
 	it("escapes CR/LF in the channel name, message, and error (no log-forging)", () => {
 		const originalWrite = process.stderr.write;
 		const captured: string[] = [];
-		process.stderr.write = ((chunk: string | Uint8Array) => {
+		process.stderr.write = (chunk: string | Uint8Array): boolean => {
 			captured.push(
 				typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk),
 			);
 			return true;
-		}) as typeof process.stderr.write;
+		};
 
 		try {
 			const channel: LogChannel = {

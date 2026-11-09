@@ -1,5 +1,6 @@
 import "./augmentations.js";
 import { ConsoleChannel } from "./channels/ConsoleChannel.js";
+import { SpectrumError } from "./errors.js";
 import { onLog } from "./events.js";
 import { Logger } from "./Logger.js";
 import { LoggerManager } from "./LoggerManager.js";
@@ -45,13 +46,17 @@ function isPartialLogConfig(value: unknown): value is Partial<LogConfig> {
 	return typeof value === "object" && value !== null;
 }
 
+/**
+ * The slice of a container the provider uses. Answers `unknown` rather than a
+ * caller-chosen `T`: what comes back is checked, not asserted.
+ */
 interface SpectrumContainer {
 	singleton(token: unknown, factory: () => unknown): void;
-	resolve<T = unknown>(token: unknown): Promise<T>;
+	resolve(token: unknown): Promise<unknown>;
 }
 
 interface SpectrumConfigStore {
-	get<T = unknown>(key: string): T | undefined;
+	get(key: string): unknown;
 }
 
 export interface SpectrumAppContext {
@@ -68,7 +73,7 @@ export default class SpectrumProvider {
 	constructor(protected app: SpectrumAppContext) {}
 
 	register() {
-		const raw = this.app.config.get<unknown>("logger");
+		const raw = this.app.config.get("logger");
 		const managerConfig = this.#normalize(raw);
 
 		// Collect every channel across all loggers so shutdown can release them.
@@ -83,14 +88,19 @@ export default class SpectrumProvider {
 		// token stays bound beside it: it is what every existing
 		// `container.make(...)` asks for, and a token is not worth breaking an
 		// application over.
-		const logger = (): Promise<Logger> =>
-			this.app.container.resolve<Logger>(Logger);
+		const logger = (): Promise<unknown> => this.app.container.resolve(Logger);
 		this.app.container.singleton("spectrum.logger", logger);
 		this.app.container.singleton("logger", logger);
 	}
 
 	async boot() {
-		const logger = await this.app.container.resolve<Logger>(Logger);
+		const logger = await this.app.container.resolve(Logger);
+		if (!(logger instanceof Logger)) {
+			throw new SpectrumError(
+				"E_SPECTRUM_LOGGER_NOT_BOUND",
+				"the container resolved something other than a Logger for the Logger token",
+			);
+		}
 		this.#owned = logger;
 		setLogger(logger);
 		await this.#bridgeLogEvents();
