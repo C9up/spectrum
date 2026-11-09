@@ -16,10 +16,14 @@
 import { format } from "node:util";
 import { SpectrumError } from "./errors.js";
 import { emitLog, hasLogListeners } from "./events.js";
+import {
+	attachLineOptions,
+	type JsonLineOptions,
+	resolveLineOptions,
+} from "./jsonLine.js";
 import { redactPath, redactPathsOf } from "./redact.js";
 import { sanitizeLogValue } from "./sanitize.js";
 import {
-	attachStringifyLimits,
 	DEFAULT_STRINGIFY_LIMITS,
 	isStringifyLimit,
 	type StringifyLimits,
@@ -110,10 +114,9 @@ function serializeError(value: unknown, path: readonly Error[] = []): unknown {
 	return out;
 }
 
-/** The config's stringify limits, checked; `undefined` when both are default. */
-function stringifyLimits(config: LogConfig): StringifyLimits | undefined {
+/** The config's stringify limits, checked. */
+function stringifyLimits(config: LogConfig): StringifyLimits {
 	const { depthLimit, edgeLimit } = config;
-	if (depthLimit === undefined && edgeLimit === undefined) return undefined;
 	for (const [name, value] of [
 		["depthLimit", depthLimit],
 		["edgeLimit", edgeLimit],
@@ -129,6 +132,27 @@ function stringifyLimits(config: LogConfig): StringifyLimits | undefined {
 		depthLimit: depthLimit ?? DEFAULT_STRINGIFY_LIMITS.depthLimit,
 		edgeLimit: edgeLimit ?? DEFAULT_STRINGIFY_LIMITS.edgeLimit,
 	};
+}
+
+/** The config's line options, checked; `undefined` when all are default. */
+function lineOptions(config: LogConfig): JsonLineOptions | undefined {
+	const limits = stringifyLimits(config);
+	const { messageKey, timestamp, base, formatters, depthLimit, edgeLimit } =
+		config;
+	if (
+		[messageKey, timestamp, base, formatters, depthLimit, edgeLimit].every(
+			(value) => value === undefined,
+		)
+	) {
+		return undefined;
+	}
+	return resolveLineOptions({
+		messageKey,
+		timestamp,
+		base,
+		formatters,
+		limits,
+	});
 }
 
 const DEFAULT_SERIALIZERS: Record<string, LogSerializer> = {
@@ -152,8 +176,11 @@ export class Logger {
 	#level?: LogLevelWithSilent;
 	/** `config.redact` compiled once, as pino compiles its redactor once. */
 	readonly #redactPaths: string[][];
-	/** The fallback stringifier's limits, when the config moved them. */
-	readonly #limits: StringifyLimits | undefined;
+	/**
+	 * How a JSON channel writes this logger's lines, when the config moved
+	 * anything away from the defaults.
+	 */
+	readonly #lineOptions: JsonLineOptions | undefined;
 
 	constructor(
 		config: LogConfig,
@@ -183,7 +210,7 @@ export class Logger {
 			assertLogLevel(value);
 		}
 		this.#redactPaths = redactPathsOf(this.#config.redact);
-		this.#limits = stringifyLimits(this.#config);
+		this.#lineOptions = lineOptions(this.#config);
 	}
 
 	/** Whether the logger is enabled. When false every log call is a no-op. */
@@ -458,7 +485,9 @@ export class Logger {
 			timestamp: new Date().toISOString(),
 		};
 
-		if (this.#limits !== undefined) attachStringifyLimits(entry, this.#limits);
+		if (this.#lineOptions !== undefined) {
+			attachLineOptions(entry, this.#lineOptions);
+		}
 
 		// Observers before the channels: a channel that throws falls back to
 		// stderr, and an observer must not be skipped by that path.

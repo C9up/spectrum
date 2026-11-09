@@ -4,8 +4,9 @@
  * @implements FR57, FR58
  */
 
+import { jsonLine, lineOptionsFor } from "../jsonLine.js";
 import { sanitizeLogValue } from "../sanitize.js";
-import { stringifyLimitsFor, stringifyRecord } from "../stringify.js";
+import { stringifyRecord } from "../stringify.js";
 import type { LogChannel, LogEntry } from "../types.js";
 import { logEntryExtras } from "../types.js";
 
@@ -41,18 +42,7 @@ export class ConsoleChannel implements LogChannel {
 	#writeJson(entry: LogEntry): void {
 		// Structural fields first, then merged root fields spread flat (pino
 		// output parity). Legacy `data` (if present) stays under its own key.
-		const output = stringifyRecord(
-			{
-				timestamp: entry.timestamp,
-				level: entry.level,
-				module: entry.module,
-				message: entry.message,
-				correlationId: entry.correlationId,
-				data: entry.data,
-				...logEntryExtras(entry),
-			},
-			stringifyLimitsFor(entry),
-		);
+		const output = jsonLine(entry);
 		this.#writeToStream(entry.level, `${output}\n`);
 	}
 
@@ -81,7 +71,7 @@ export class ConsoleChannel implements LogChannel {
 		const payload =
 			entry.data ?? (Object.keys(extras).length > 0 ? extras : undefined);
 		const dataStr = payload
-			? ` ${this.#sanitize(stringifyRecord(payload, stringifyLimitsFor(entry)))}`
+			? ` ${this.#sanitize(stringifyRecord(payload, lineOptionsFor(entry).limits))}`
 			: "";
 		const message = this.#sanitize(entry.message);
 		const module = this.#sanitize(entry.module);

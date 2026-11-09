@@ -89,10 +89,8 @@ setImmediate(() => process.exit(0))
 			.split("\n")
 			.map((line) => {
 				const parsed: unknown = JSON.parse(line);
-				return typeof parsed === "object" &&
-					parsed !== null &&
-					"message" in parsed
-					? parsed.message
+				return typeof parsed === "object" && parsed !== null && "msg" in parsed
+					? parsed.msg
 					: undefined;
 			});
 		expect(new Set(messages).size).toBe(5000);

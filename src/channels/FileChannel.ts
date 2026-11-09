@@ -20,7 +20,7 @@ import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { promisify } from "node:util";
 import { SpectrumError } from "../errors.js";
-import { stringifyLimitsFor, stringifyRecord } from "../stringify.js";
+import { jsonLine } from "../jsonLine.js";
 import type { LogChannel, LogEntry } from "../types.js";
 
 export interface FileChannelConfig {
@@ -139,7 +139,7 @@ export class FileChannel implements LogChannel {
 
 	write(entry: LogEntry): void {
 		if (this.#closed) return;
-		const line = `${stringifyRecord(entry, stringifyLimitsFor(entry))}\n`;
+		const line = `${jsonLine(entry)}\n`;
 		const bytes = Buffer.byteLength(line, "utf8");
 		if (this.#pendingBytes + bytes > this.#maxBuffer) {
 			this.#dropped += 1;
@@ -279,7 +279,7 @@ export class FileChannel implements LogChannel {
 	#enqueueDropNotice(): void {
 		const count = this.#dropped;
 		this.#dropped = 0;
-		const line = `${stringifyRecord({
+		const line = `${jsonLine({
 			timestamp: new Date().toISOString(),
 			level: "warn",
 			module: "spectrum",

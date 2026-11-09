@@ -80,7 +80,7 @@ describe("spectrum > lines survive payloads JSON.stringify rejects", () => {
 			"circular payload",
 		);
 		const line = onlyLine();
-		expect(field(line, "message")).toBe("circular payload");
+		expect(field(line, "msg")).toBe("circular payload");
 		expect(field(line, "requestId")).toBe("r1");
 		expect(field(line, "user")).toEqual({ a: 1, self: "[Circular]" });
 	});
@@ -88,7 +88,7 @@ describe("spectrum > lines survive payloads JSON.stringify rejects", () => {
 	it("keeps a circular child binding", () => {
 		jsonLogger().child({ ctx: circular() }).warn("from a child");
 		const line = onlyLine();
-		expect(field(line, "level")).toBe("warn");
+		expect(field(line, "level")).toBe(40);
 		expect(field(line, "ctx")).toEqual({ a: 1, self: "[Circular]" });
 	});
 

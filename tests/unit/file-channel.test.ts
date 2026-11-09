@@ -58,8 +58,8 @@ describe("spectrum > FileChannel", () => {
 		const content = await fsp.readFile(nestedPath, "utf8");
 		const lines = content.trim().split("\n");
 		expect(lines).toHaveLength(2);
-		expect(JSON.parse(defined(lines[0])).message).toBe("first");
-		expect(JSON.parse(defined(lines[1])).message).toBe("second");
+		expect(JSON.parse(defined(lines[0])).msg).toBe("first");
+		expect(JSON.parse(defined(lines[1])).msg).toBe("second");
 	});
 
 	it("appends to an existing file (initial #currentSize from statSync)", async () => {
@@ -129,9 +129,9 @@ describe("spectrum > close() is terminal", () => {
 
 	it("writes nothing after close, and does not reopen the file", async () => {
 		const ch = new FileChannel({ path: logPath });
-		ch.write(makeEntry({ msg: "before" }));
+		ch.write(makeEntry({ message: "before" }));
 		ch.close();
-		ch.write(makeEntry({ msg: "after" }));
+		ch.write(makeEntry({ message: "after" }));
 		await flush();
 
 		// `close()` only nulled the stream, and `write()` reopens a null stream —
@@ -145,8 +145,8 @@ describe("spectrum > close() is terminal", () => {
 		// Small enough that the second line triggers a rotation and lands in the
 		// pending buffer.
 		const ch = new FileChannel({ path: logPath, maxSizeBytes: 120 });
-		ch.write(makeEntry({ msg: "x".repeat(100) }));
-		ch.write(makeEntry({ msg: "buffered-line" }));
+		ch.write(makeEntry({ message: "x".repeat(100) }));
+		ch.write(makeEntry({ message: "buffered-line" }));
 		ch.close();
 		await flush();
 
@@ -161,7 +161,7 @@ describe("spectrum > close() is terminal", () => {
 
 	it("is safe to call twice", () => {
 		const ch = new FileChannel({ path: logPath });
-		ch.write(makeEntry({ msg: "one" }));
+		ch.write(makeEntry({ message: "one" }));
 
 		expect(() => {
 			ch.close();

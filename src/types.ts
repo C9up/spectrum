@@ -1,4 +1,5 @@
 import { SpectrumError } from "./errors.js";
+import type { LineFormatters, TimestampOption } from "./jsonLine.js";
 import type { TransportTargetOptions } from "./targets.js";
 /**
  * Spectrum types.
@@ -164,6 +165,14 @@ export interface LogConfig {
 	depthLimit?: number;
 	/** How many entries of one such object or array are written. Default 100, as pino. */
 	edgeLimit?: number;
+	/** The key a JSON line carries the message under. Default `msg`. */
+	messageKey?: string;
+	/** How a JSON line writes `time`. Default `'epoch'` (milliseconds). */
+	timestamp?: TimestampOption;
+	/** Fields on every JSON line. Default `{ pid, hostname }`; `null` for none. */
+	base?: Record<string, unknown> | null;
+	/** Reshape the level part and the merged fields of a JSON line. */
+	formatters?: LineFormatters;
 }
 
 /**

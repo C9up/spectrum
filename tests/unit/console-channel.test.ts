@@ -86,9 +86,9 @@ describe("spectrum > ConsoleChannel", () => {
 		expect(out.trim().startsWith("{")).toBe(true);
 		const parsed = JSON.parse(out);
 		expect(parsed).toMatchObject({
-			level: "info",
+			level: 30,
 			module: "app",
-			message: "hello",
+			msg: "hello",
 			data: { user: 1 },
 			correlationId: "abc-12345",
 		});

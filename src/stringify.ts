@@ -30,28 +30,6 @@ export const DEFAULT_STRINGIFY_LIMITS: StringifyLimits = {
 const UNSERIALIZABLE =
 	'"[unable to serialize, circular reference is too complex to analyze]"';
 
-/**
- * Limits a logger configured for its own entries.
- *
- * Channels are built independently of the logger that writes to them, so the
- * limits travel with the entry instead of through every channel constructor.
- * Weak, so an entry that has been written leaves nothing behind.
- */
-const entryLimits = new WeakMap<object, StringifyLimits>();
-
-/** @internal Attach a logger's limits to an entry it is about to write. */
-export function attachStringifyLimits(
-	entry: object,
-	limits: StringifyLimits,
-): void {
-	entryLimits.set(entry, limits);
-}
-
-/** The limits a channel should use for this entry. */
-export function stringifyLimitsFor(entry: object): StringifyLimits {
-	return entryLimits.get(entry) ?? DEFAULT_STRINGIFY_LIMITS;
-}
-
 /** Whether a configured limit is one the walker can honour. */
 export function isStringifyLimit(value: unknown): value is number {
 	return typeof value === "number" && Number.isInteger(value) && value > 0;
