@@ -9,11 +9,66 @@
  * password is written out in full.
  */
 
+import { SpectrumError } from "./errors.js";
+
 /**
  * fast-redact's own tokenizer: a run of characters that is not `.`, `[` or
  * `]`, or anything between a pair of brackets.
  */
 const PATH_TOKEN = /[^.[\]]+|\[(?:.)*?\]/g;
+
+function invalidPath(detail: string): SpectrumError {
+	return new SpectrumError("E_SPECTRUM_INVALID_REDACT_PATH", detail);
+}
+
+/**
+ * Refuse a path the tokenizer would read as something else.
+ *
+ * `password,token` used to parse as one key with a comma in it, match nothing,
+ * and write both fields in clear under a config that reads as censoring them.
+ * These are upstream's rules (empty, `..`, `,`, unbalanced brackets), checked
+ * when the logger is built so a typo fails at boot instead of in production.
+ */
+function validateRedactPath(path: string): void {
+	if (path === "" || path.includes("..") || path.includes(",")) {
+		throw invalidPath(`Invalid redaction path (${path})`);
+	}
+	let depth = 0;
+	let quote = "";
+	for (const char of path) {
+		if ((char === '"' || char === "'") && depth > 0) {
+			if (quote === "") quote = char;
+			else if (char === quote) quote = "";
+		} else if (char === "[" && quote === "") {
+			depth += 1;
+		} else if (char === "]" && quote === "") {
+			depth -= 1;
+			if (depth < 0) throw invalidPath(`Invalid redaction path (${path})`);
+		}
+	}
+	if (depth !== 0) throw invalidPath(`Invalid redaction path (${path})`);
+}
+
+/**
+ * The paths of a `redact` option, checked: an array of strings, or an object
+ * whose `paths` is one.
+ */
+export function redactPathsOf(redact: unknown): string[][] {
+	if (redact === undefined) return [];
+	const paths =
+		typeof redact === "object" && redact !== null && "paths" in redact
+			? redact.paths
+			: redact;
+	if (!Array.isArray(paths)) {
+		throw invalidPath("redact must contain an array of strings");
+	}
+	return paths.map((path: unknown) => {
+		if (typeof path !== "string") {
+			throw invalidPath("Redaction paths must be (non-empty) strings");
+		}
+		return parseRedactPath(path);
+	});
+}
 
 /**
  * Split a redaction path into the keys it names.
@@ -22,6 +77,7 @@ const PATH_TOKEN = /[^.[\]]+|\[(?:.)*?\]/g;
  * notation, not part of the name.
  */
 export function parseRedactPath(path: string): string[] {
+	validateRedactPath(path);
 	const tokens = path.match(PATH_TOKEN);
 	if (!tokens) return [];
 	return tokens.map((token) => {

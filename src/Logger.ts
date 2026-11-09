@@ -16,7 +16,7 @@
 import { format } from "node:util";
 import { SpectrumError } from "./errors.js";
 import { emitLog, hasLogListeners } from "./events.js";
-import { parseRedactPath, redactPath } from "./redact.js";
+import { redactPath, redactPathsOf } from "./redact.js";
 import { sanitizeLogValue } from "./sanitize.js";
 import {
 	attachStringifyLimits,
@@ -173,10 +173,7 @@ export class Logger {
 		this.#module = module;
 		this.#correlationId = correlationId;
 		this.#bindings = bindings;
-		const redact = this.#config.redact;
-		const paths =
-			redact === undefined ? [] : Array.isArray(redact) ? redact : redact.paths;
-		this.#redactPaths = paths.map(parseRedactPath);
+		this.#redactPaths = redactPathsOf(this.#config.redact);
 		this.#limits = stringifyLimits(this.#config);
 	}
 
