@@ -23,6 +23,7 @@ export {
 	parseRustLog,
 	type RustLogBridgeOptions,
 } from "./RustLogBridge.js";
+export { stdSerializers, stdTimeFunctions } from "./stdSerializers.js";
 export type {
 	FileTargetOptions,
 	PrettyTargetOptions,
@@ -30,12 +31,16 @@ export type {
 } from "./targets.js";
 export { channelsFromTargets, Targets, targets } from "./targets.js";
 export {
+	type ChildOptions,
 	isLogLevelWithSilent,
+	type LineWritable,
 	type LogChannel,
 	type LogConfig,
 	type LogEntry,
 	type LoggerManagerConfig,
 	type LogLevelWithSilent,
+	type LogMethodHook,
+	type LogMixin,
 	type LogSerializer,
 	logEntryExtras,
 	logLevel,

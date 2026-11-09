@@ -38,11 +38,18 @@ export class LoggerManager extends Logger {
 				`[spectrum] Unknown logger "${key}". Registered: ${Object.keys(this.#config.loggers).join(", ")}`,
 			);
 		}
-		if (!config.name) config.name = key;
-
-		const logger = this.create(config);
+		const logger = this.createLogger(key, config);
 		this.#loggers.set(key, logger);
 		return logger;
+	}
+
+	/**
+	 * Build a named logger: the config's `name` defaults to the name it is
+	 * registered under. Not cached; `use()` caches what this returns.
+	 */
+	createLogger(name: string, config: LogConfig): Logger {
+		if (!config.name) config.name = name;
+		return new Logger(config);
 	}
 
 	/**

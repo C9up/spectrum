@@ -122,7 +122,44 @@ export type LogSerializer = (value: unknown) => unknown;
 /** Redaction config (pino `redact` parity). */
 export interface RedactOptions {
 	paths: string[];
-	censor?: string;
+	/**
+	 * What a matched value becomes. A function is called with the value and
+	 * the path it was found at (wildcards resolved). Default `[Redacted]`.
+	 */
+	censor?: string | ((value: unknown, path: string[]) => unknown);
+	/** Remove matched keys instead of censoring them. */
+	remove?: boolean;
+}
+
+/** Called with each log call's arguments; calls `method` to write (pino `hooks.logMethod`). */
+export type LogMethodHook = (
+	this: unknown,
+	args: unknown[],
+	method: (...args: unknown[]) => void,
+	level: number,
+) => void;
+
+/** Fields to add to every line, computed per call (pino `mixin`). */
+export type LogMixin = (
+	mergeObject: Record<string, unknown>,
+	level: number,
+	logger: unknown,
+) => Record<string, unknown>;
+
+/** Options of `logger.child(bindings, options)`. */
+export interface ChildOptions {
+	level?: LogLevelWithSilent;
+	/** Replaces the parent's redaction for this child. */
+	redact?: string[] | RedactOptions;
+	/** Added to (and overriding) the parent's serializers. */
+	serializers?: Record<string, LogSerializer>;
+	/** Appended to the parent's prefix, written before every message. */
+	msgPrefix?: string;
+}
+
+/** Anything with a `write(line)` method, used as a JSON destination. */
+export interface LineWritable {
+	write(line: string): unknown;
 }
 
 /**
@@ -151,7 +188,15 @@ export interface LogConfig {
 	 * drives real output instead of being quietly ignored. Explicit `channels`
 	 * win when both are given.
 	 */
-	transport?: { targets?: readonly TransportTargetOptions[] };
+	transport?:
+		| { targets?: readonly TransportTargetOptions[] }
+		| TransportTargetOptions;
+	/**
+	 * Where JSON lines go when no `channels` are given: a file path, a file
+	 * descriptor, or anything with a `write(line)` method. Wins over
+	 * `transport`, as upstream.
+	 */
+	destination?: string | number | LineWritable;
 	/** Per-module level overrides — spectrum divergence. */
 	modules?: Record<string, LogLevelWithSilent>;
 	/** Keys / dot-paths to redact on the merging object before writing. */
@@ -173,6 +218,20 @@ export interface LogConfig {
 	base?: Record<string, unknown> | null;
 	/** Reshape the level part and the merged fields of a JSON line. */
 	formatters?: LineFormatters;
+	/** The key an Error passed to a log call is written under. Default `err`. */
+	errorKey?: string;
+	/** Written before every message. */
+	msgPrefix?: string;
+	/** Fields added to every line, computed per call. A merging object wins over them. */
+	mixin?: LogMixin;
+	/** How the mixin's fields and the merging object combine. Default: merging object wins. */
+	mixinMergeStrategy?: (
+		mergeObject: Record<string, unknown>,
+		mixinObject: Record<string, unknown>,
+	) => Record<string, unknown>;
+	hooks?: { logMethod?: LogMethodHook };
+	/** Called with every child logger created. */
+	onChild?: (child: unknown) => void;
 }
 
 /**

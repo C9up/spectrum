@@ -5,7 +5,7 @@ import { onLog } from "./events.js";
 import { Logger } from "./Logger.js";
 import { LoggerManager } from "./LoggerManager.js";
 import { clearLogger, getLogger, setLogger } from "./services/main.js";
-import { channelsFromTargets } from "./targets.js";
+import { channelsFromConfig } from "./targets.js";
 import type {
 	LogChannel,
 	LogConfig,
@@ -215,16 +215,12 @@ export default class SpectrumProvider {
 		return { ...cfg, level, channels };
 	}
 
-	/** Explicit channels, else the declared targets, else a pretty console. */
+	/** Explicit channels, else the declared destination or targets, else a pretty console. */
 	#channelsFor(
 		cfg: Partial<LogConfig>,
 		level: LogLevelWithSilent,
 	): LogChannel[] {
 		if (cfg.channels && cfg.channels.length > 0) return cfg.channels;
-		const declared = cfg.transport?.targets;
-		if (declared && declared.length > 0) {
-			return channelsFromTargets(declared, level);
-		}
-		return [new ConsoleChannel("pretty")];
+		return channelsFromConfig(cfg, level) ?? [new ConsoleChannel("pretty")];
 	}
 }

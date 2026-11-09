@@ -87,8 +87,17 @@ export function parseRedactPath(path: string): string[] {
 }
 
 /**
- * Replace everything `tokens` selects with `censor`, without touching the
- * input.
+ * What a matched value becomes: the censor's answer for the value and the
+ * concrete path it was found at (wildcards resolved), as upstream calls a
+ * censor function — or nothing at all, with `remove`.
+ */
+export interface RedactAction {
+	censor: (value: unknown, path: string[]) => unknown;
+	remove: boolean;
+}
+
+/**
+ * Replace everything `tokens` selects, without touching the input.
  *
  * Copy-on-write, and the copy is only made once something actually matched —
  * so an entry with no redacted field is passed through by reference, which is
@@ -99,8 +108,9 @@ export function parseRedactPath(path: string): string[] {
 export function redactPath(
 	node: unknown,
 	tokens: readonly string[],
-	censor: string,
+	action: RedactAction,
 	depth = 0,
+	trail: readonly string[] = [],
 ): unknown {
 	const segment = tokens[depth];
 	if (segment === undefined || node === null || typeof node !== "object") {
@@ -114,14 +124,32 @@ export function redactPath(
 	let copy: Record<string, unknown> | unknown[] | null = null;
 	for (const key of keys) {
 		const current = readKey(node, key);
+		const path = [...trail, key];
+		if (isLast && action.remove) {
+			copy ??= Array.isArray(node) ? [...node] : copyObject(node);
+			removeKey(copy, key);
+			continue;
+		}
 		const next = isLast
-			? censor
-			: redactPath(current, tokens, censor, depth + 1);
+			? action.censor(current, path)
+			: redactPath(current, tokens, action, depth + 1, path);
 		if (next === current) continue;
-		if (!copy) copy = Array.isArray(node) ? [...node] : copyObject(node);
+		copy ??= Array.isArray(node) ? [...node] : copyObject(node);
 		writeKey(copy, key, next);
 	}
 	return copy ?? node;
+}
+
+function removeKey(
+	node: Record<string, unknown> | unknown[],
+	key: string,
+): void {
+	if (Array.isArray(node)) {
+		const index = Number(key);
+		if (Number.isInteger(index)) node[index] = undefined;
+		return;
+	}
+	Reflect.deleteProperty(node, key);
 }
 
 /**

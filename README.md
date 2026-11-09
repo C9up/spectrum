@@ -39,13 +39,30 @@ logger.child({ module: 'db', correlationId: 'abc-123' }).debug('Query executed')
 
 ## Features
 
-- 6 log levels: trace, debug, info, warn, error, fatal
-- ConsoleChannel (pretty + JSON formats) and FileChannel (rotating)
-- Transport targets, with a level per destination
-- Redaction (`*.password`, `users[*].token`, `headers["set-cookie"]`)
+- 6 log levels: trace, debug, info, warn, error, fatal; an unknown level throws
+- JSON lines in the usual shape: `{"level":30,"time":…,"pid":…,"hostname":…,"msg":…}`,
+  shaped by `messageKey`, `timestamp`, `base` and `formatters`
+- ConsoleChannel (pretty + JSON) and FileChannel (rotating, flushed on exit,
+  bounded buffer)
+- Transport targets (`pino-pretty`, `pino/file`, or a `LogChannel`), with a
+  level per destination; `destination` for a path, a descriptor or a stream
+- Redaction (`*.password`, `users[*].token`, `headers["set-cookie"]`), with
+  `censor` as a value or a function, and `remove`
+- `mixin`, `hooks.logMethod`, `errorKey`, `msgPrefix`, `depthLimit` / `edgeLimit`
+- Child loggers with scoped module/correlationId, and `child(bindings, { level, redact, serializers, msgPrefix })`
+- `stdSerializers` (`err`, `req`, `res`) and `stdTimeFunctions`
 - Per-module level overrides
-- Child loggers with scoped module/correlationId
-- error/fatal → stderr, others → stdout
+- Pretty console: error/fatal → stderr, others → stdout
+
+## Not supported
+
+Spectrum writes through its own channels rather than pino streams, so these
+are not available: `destination()`, `destinations`, `multistream()` and
+`transport()` exports, worker-thread transports (`pino-loki`, `pino-socket`…:
+plug a `LogChannel` instead), `transport.pipeline`, `customLevels`,
+`useOnlyCustomLevels`, `levelComparison`, `nestedKey`, `crlf`,
+`hooks.streamWrite`, and the `pinoVersion` / `version` getters. The options
+among them throw when configured, so a config is never run as something else.
 
 ## License
 

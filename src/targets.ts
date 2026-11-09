@@ -17,7 +17,14 @@
 import { ConsoleChannel } from "./channels/ConsoleChannel.js";
 import { FileChannel } from "./channels/FileChannel.js";
 import { SpectrumError } from "./errors.js";
-import type { LogChannel, LogEntry, LogLevelWithSilent } from "./types.js";
+import { jsonLine } from "./jsonLine.js";
+import type {
+	LineWritable,
+	LogChannel,
+	LogConfig,
+	LogEntry,
+	LogLevelWithSilent,
+} from "./types.js";
 import {
 	isLogLevelWithSilent,
 	LOG_LEVEL_ORDER,
@@ -278,4 +285,67 @@ function invalidOption(
 		"E_SPECTRUM_INVALID_FILE_OPTIONS",
 		`pino/file option ${key} must be a ${type}, got ${typeof value}`,
 	);
+}
+
+/** JSON lines to anything with a `write(line)` method. */
+class WritableChannel implements LogChannel {
+	readonly name = "destination";
+	readonly #target: LineWritable;
+
+	constructor(target: LineWritable) {
+		this.#target = target;
+	}
+
+	write(entry: LogEntry): void {
+		this.#target.write(`${jsonLine(entry)}\n`);
+	}
+}
+
+function isLineWritable(value: unknown): value is LineWritable {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		"write" in value &&
+		typeof value.write === "function"
+	);
+}
+
+/** The channel a logger's `destination` option names. */
+export function destinationChannel(destination: unknown): LogChannel {
+	if (typeof destination === "string")
+		return new FileChannel({ path: destination });
+	if (typeof destination === "number") return descriptorChannel(destination);
+	if (isLineWritable(destination)) return new WritableChannel(destination);
+	throw new SpectrumError(
+		"E_SPECTRUM_UNSUPPORTED_TARGET",
+		"destination must be a path, a file descriptor or an object with a write(line) method",
+	);
+}
+
+/**
+ * The channels a config's `destination` or `transport` describe, or
+ * `undefined` when it declares neither. `destination` wins over `transport`,
+ * as upstream; a transport is either a `targets` list or one
+ * `{ target, options }`.
+ */
+export function channelsFromConfig(
+	config: Pick<LogConfig, "destination" | "transport">,
+	level: LogLevelWithSilent | string | undefined,
+): LogChannel[] | undefined {
+	if (config.destination !== undefined) {
+		return [destinationChannel(config.destination)];
+	}
+	const transport = config.transport;
+	if (transport === undefined) return undefined;
+	if ("target" in transport) return channelsFromTargets([transport], level);
+	if (Reflect.get(transport, "pipeline") !== undefined) {
+		throw new SpectrumError(
+			"E_SPECTRUM_UNSUPPORTED_TARGET",
+			"transport.pipeline is not supported: declare targets, or pass channels",
+		);
+	}
+	if (transport.targets === undefined || transport.targets.length === 0) {
+		return undefined;
+	}
+	return channelsFromTargets(transport.targets, level);
 }

@@ -21,15 +21,17 @@ import {
 	type JsonLineOptions,
 	resolveLineOptions,
 } from "./jsonLine.js";
-import { redactPath, redactPathsOf } from "./redact.js";
+import { type RedactAction, redactPath, redactPathsOf } from "./redact.js";
 import { sanitizeLogValue } from "./sanitize.js";
+import { serializeError } from "./stdSerializers.js";
 import {
 	DEFAULT_STRINGIFY_LIMITS,
 	isStringifyLimit,
 	type StringifyLimits,
 } from "./stringify.js";
-import { channelsFromTargets } from "./targets.js";
+import { channelsFromConfig } from "./targets.js";
 import type {
+	ChildOptions,
 	LogConfig,
 	LogEntry,
 	LogLevel,
@@ -60,58 +62,6 @@ function isMergeableObject(value: unknown): value is Record<string, unknown> {
 		!Array.isArray(value) &&
 		!(value instanceof Error)
 	);
-}
-
-/** How far down a chain of nested errors to follow. */
-const MAX_CAUSE_DEPTH = 8;
-
-/**
- * Serialize an Error the way pino's `err` serializer does. Non-Error values
- * pass through untouched.
- *
- * `{ name, message, stack }` threw away everything the error was carrying.
- * `err.code` is usually the one field a log search is keyed on, and the `cause`
- * of a wrapped error is the half that says what actually failed — both were
- * dropped, silently, by a serializer whose job is to keep them.
- *
- * `path` holds the errors being serialized above this one. An error met again
- * on its own path is a cycle and is written as `"[Circular]"`, as upstream
- * skips an error it has already tagged; without it `err.self = err` was copied
- * down to the depth limit, and an error with k such references cost k^8 copies
- * on the logging call. An error shared by two branches is not a cycle and is
- * written in both.
- */
-function serializeError(value: unknown, path: readonly Error[] = []): unknown {
-	if (!(value instanceof Error)) return value;
-	if (path.includes(value)) return "[Circular]";
-	if (path.length > MAX_CAUSE_DEPTH) return "[cause chain too deep]";
-	const below = [...path, value];
-
-	// Own ENUMERABLE properties only, which on an Error means the ones it was
-	// given: `message`, `stack` and `name` are not among them.
-	const out: Record<string, unknown> = { ...value };
-	for (const [key, nested] of Object.entries(out)) {
-		if (nested instanceof Error) out[key] = serializeError(nested, below);
-	}
-
-	// Upstream reads the constructor rather than `name`, so a subclass that
-	// never assigns `this.name` is still reported as itself, and it names the
-	// field `type` — which is what an Adonis log pipeline reads.
-	out.type =
-		typeof value.constructor === "function"
-			? value.constructor.name
-			: value.name;
-	out.message = value.message;
-	out.stack = value.stack;
-	if (value instanceof AggregateError && Array.isArray(value.errors)) {
-		out.aggregateErrors = value.errors.map((each: unknown) =>
-			serializeError(each, below),
-		);
-	}
-	if (value.cause !== undefined) {
-		out.cause = serializeError(value.cause, below);
-	}
-	return out;
 }
 
 /** The config's stringify limits, checked. */
@@ -155,6 +105,62 @@ function lineOptions(config: LogConfig): JsonLineOptions | undefined {
 	});
 }
 
+/**
+ * Upstream options spectrum cannot honour. Ignoring them would run the logger
+ * as something other than what the config says, so they are refused.
+ */
+const UNSUPPORTED_OPTIONS = [
+	"customLevels",
+	"useOnlyCustomLevels",
+	"levelComparison",
+	"nestedKey",
+	"crlf",
+] as const;
+
+function rejectUnsupportedOptions(config: LogConfig): void {
+	for (const option of UNSUPPORTED_OPTIONS) {
+		const value: unknown = Reflect.get(config, option);
+		if (value !== undefined) {
+			throw new SpectrumError(
+				"E_SPECTRUM_UNSUPPORTED_OPTION",
+				`the "${option}" logger option is not supported`,
+			);
+		}
+	}
+	const streamWrite: unknown =
+		config.hooks === undefined
+			? undefined
+			: Reflect.get(config.hooks, "streamWrite");
+	if (streamWrite !== undefined) {
+		throw new SpectrumError(
+			"E_SPECTRUM_UNSUPPORTED_OPTION",
+			'the "hooks.streamWrite" logger option is not supported',
+		);
+	}
+}
+
+/**
+ * The config with its output resolved to channels, once: explicit `channels`
+ * win, then `destination`, then the transport's targets.
+ */
+function withChannels(config: LogConfig): LogConfig {
+	if (config.channels !== undefined) return config;
+	const channels = channelsFromConfig(config, config.level);
+	return channels === undefined ? config : { ...config, channels };
+}
+
+/** `config.redact`'s censor (or removal), compiled once. */
+function redactAction(redact: LogConfig["redact"]): RedactAction {
+	if (redact === undefined || Array.isArray(redact)) {
+		return { remove: false, censor: () => "[Redacted]" };
+	}
+	const censor = redact.censor ?? "[Redacted]";
+	return {
+		remove: redact.remove === true,
+		censor: typeof censor === "function" ? censor : () => censor,
+	};
+}
+
 const DEFAULT_SERIALIZERS: Record<string, LogSerializer> = {
 	err: serializeError,
 	error: serializeError,
@@ -176,6 +182,7 @@ export class Logger {
 	#level?: LogLevelWithSilent;
 	/** `config.redact` compiled once, as pino compiles its redactor once. */
 	readonly #redactPaths: string[][];
+	readonly #redactAction: RedactAction;
 	/**
 	 * How a JSON channel writes this logger's lines, when the config moved
 	 * anything away from the defaults.
@@ -192,16 +199,8 @@ export class Logger {
 		// channels. Convert once here so every read path downstream sees only
 		// channels — an explicit `channels` list wins, since it is the more
 		// specific statement of intent.
-		this.#config =
-			config.channels === undefined && config.transport?.targets !== undefined
-				? {
-						...config,
-						channels: channelsFromTargets(
-							config.transport.targets,
-							config.level,
-						),
-					}
-				: config;
+		rejectUnsupportedOptions(config);
+		this.#config = withChannels(config);
 		this.#module = module;
 		this.#correlationId = correlationId;
 		this.#bindings = bindings;
@@ -210,6 +209,7 @@ export class Logger {
 			assertLogLevel(value);
 		}
 		this.#redactPaths = redactPathsOf(this.#config.redact);
+		this.#redactAction = redactAction(this.#config.redact);
 		this.#lineOptions = lineOptions(this.#config);
 	}
 
@@ -275,22 +275,52 @@ export class Logger {
 	 * Create a child logger. Accepts arbitrary bindings that are merged into
 	 * every entry; `module` and `correlationId` are honoured as conventions.
 	 * This is the preferred way to scope per-request logging.
+	 *
+	 * `options` are upstream's: the child's own `level`, a `redact` that
+	 * replaces the parent's, `serializers` added to the parent's, and a
+	 * `msgPrefix` appended to the parent's.
 	 */
-	child(bindings: Record<string, unknown> = {}): Logger {
+	child(
+		bindings: Record<string, unknown> = {},
+		options?: ChildOptions,
+	): Logger {
 		if (!this.isEnabled) return this;
 		const { module, correlationId, ...rest } = bindings;
 		const nextModule = typeof module === "string" ? module : this.#module;
 		const nextCorrelation =
 			typeof correlationId === "string" ? correlationId : this.#correlationId;
-		const child = new Logger(this.#config, nextModule, nextCorrelation, {
-			...this.#bindings,
-			...rest,
-		});
+		const child = new Logger(
+			options === undefined ? this.#config : this.#childConfig(options),
+			nextModule,
+			nextCorrelation,
+			{ ...this.#bindings, ...rest },
+		);
 		// A child starts where its parent stands now, and moves on its own
 		// afterwards — pino's semantics, and the reason the level cannot live
 		// in the config the two of them share.
-		if (this.#level !== undefined) child.level = this.#level;
+		const level = options?.level ?? this.#level;
+		if (level !== undefined) child.level = level;
+		this.#config.onChild?.(child);
 		return child;
+	}
+
+	/** The config a child with options writes under; the parent's is untouched. */
+	#childConfig(options: ChildOptions): LogConfig {
+		return {
+			...this.#config,
+			...(options.redact !== undefined ? { redact: options.redact } : {}),
+			...(options.serializers !== undefined
+				? {
+						serializers: {
+							...this.#config.serializers,
+							...options.serializers,
+						},
+					}
+				: {}),
+			...(options.msgPrefix !== undefined
+				? { msgPrefix: (this.#config.msgPrefix ?? "") + options.msgPrefix }
+				: {}),
+		};
 	}
 
 	/** Current bindings (logger name + child bindings + module/correlationId). */
@@ -404,17 +434,45 @@ export class Logger {
 		arg0: unknown,
 		rest: unknown[],
 	): { message: string; mergingObject?: Record<string, unknown> } {
+		const { message, mergingObject, given } = this.#splitArgs(arg0, rest);
+		// The prefix goes on a message the call gave, as upstream's does.
+		const prefix = this.#config.msgPrefix;
+		return {
+			message: prefix !== undefined && given ? prefix + message : message,
+			...(mergingObject !== undefined ? { mergingObject } : {}),
+		};
+	}
+
+	#splitArgs(
+		arg0: unknown,
+		rest: unknown[],
+	): {
+		message: string;
+		mergingObject?: Record<string, unknown>;
+		given: boolean;
+	} {
+		const errorKey = this.#config.errorKey ?? "err";
 		if (arg0 instanceof Error) {
 			const message =
 				typeof rest[0] === "string"
 					? format(rest[0], ...rest.slice(1))
 					: arg0.message;
-			return { message, mergingObject: { err: arg0 } };
+			return { message, mergingObject: { [errorKey]: arg0 }, given: true };
 		}
 		if (isMergeableObject(arg0)) {
-			const message =
-				typeof rest[0] === "string" ? format(rest[0], ...rest.slice(1)) : "";
-			return { message, mergingObject: arg0 };
+			if (typeof rest[0] === "string") {
+				return {
+					message: format(rest[0], ...rest.slice(1)),
+					mergingObject: arg0,
+					given: true,
+				};
+			}
+			// An object carrying an error and no message is described by the
+			// error's message, as upstream does.
+			const err = Object.hasOwn(arg0, errorKey) ? arg0[errorKey] : undefined;
+			return err instanceof Error
+				? { message: err.message, mergingObject: arg0, given: true }
+				: { message: "", mergingObject: arg0, given: false };
 		}
 
 		const template = typeof arg0 === "string" ? arg0 : String(arg0);
@@ -423,17 +481,35 @@ export class Logger {
 			isMergeableObject(rest[0]) &&
 			!PRINTF_TOKEN.test(template)
 		) {
-			return { message: template, mergingObject: rest[0] };
+			return { message: template, mergingObject: rest[0], given: true };
 		}
 		const message = rest.length > 0 ? format(template, ...rest) : template;
-		return { message };
+		return { message, given: true };
+	}
+
+	/** The merging object with the mixin's fields; the merging object wins by default. */
+	#withMixin(
+		mergingObject: Record<string, unknown>,
+		level: LogLevel,
+	): Record<string, unknown> {
+		const mixin = this.#config.mixin;
+		if (mixin === undefined) return mergingObject;
+		const mixed: unknown = mixin(mergingObject, LOG_LEVEL_ORDER[level], this);
+		const mixinObject = isMergeableObject(mixed) ? mixed : {};
+		const strategy = this.#config.mixinMergeStrategy;
+		return strategy !== undefined
+			? strategy(mergingObject, mixinObject)
+			: { ...mixinObject, ...mergingObject };
 	}
 
 	#applySerializers(bag: Record<string, unknown>): Record<string, unknown> {
 		const serializers = { ...DEFAULT_SERIALIZERS, ...this.#config.serializers };
+		const errorKey = this.#config.errorKey ?? "err";
 		let out: Record<string, unknown> | null = null;
 		for (const key of Object.keys(bag)) {
-			const serializer = serializers[key];
+			// The error key takes the `err` serializer unless it has its own.
+			const serializer =
+				serializers[key] ?? (key === errorKey ? serializers.err : undefined);
 			if (serializer) {
 				if (!out) out = { ...bag };
 				out[key] = serializer(bag[key]);
@@ -444,23 +520,36 @@ export class Logger {
 
 	#applyRedact(bag: Record<string, unknown>): Record<string, unknown> {
 		if (this.#redactPaths.length === 0) return bag;
-		const redact = this.#config.redact;
-		const censor =
-			redact === undefined || Array.isArray(redact)
-				? "[Redacted]"
-				: (redact.censor ?? "[Redacted]");
 		let out: unknown = bag;
 		for (const tokens of this.#redactPaths) {
-			out = redactPath(out, tokens, censor);
+			out = redactPath(out, tokens, this.#redactAction);
 		}
 		return isMergeableObject(out) ? out : bag;
 	}
 
-	#write(level: LogLevel, arg0: unknown, rest: unknown[]): void {
+	#write(
+		level: LogLevel,
+		arg0: unknown,
+		rest: unknown[],
+		viaHook = false,
+	): void {
 		if (!this.isEnabled) return;
 		if (LOG_LEVEL_ORDER[level] < this.#threshold()) return;
 
+		const hook = this.#config.hooks?.logMethod;
+		if (hook !== undefined && !viaHook) {
+			hook.call(
+				this,
+				[arg0, ...rest],
+				(...args: unknown[]) =>
+					this.#write(level, args[0], args.slice(1), true),
+				LOG_LEVEL_ORDER[level],
+			);
+			return;
+		}
+
 		const { message, mergingObject } = this.#resolveArgs(arg0, rest);
+		const merged = this.#withMixin(mergingObject ?? {}, level);
 
 		let bag: Record<string, unknown> = {
 			// The name a multi-logger config gave this logger. It was assigned by
@@ -469,7 +558,7 @@ export class Logger {
 			// pino carries it as a binding; a merging object still wins over it.
 			...(this.#config.name !== undefined ? { name: this.#config.name } : {}),
 			...this.#bindings,
-			...(mergingObject ?? {}),
+			...merged,
 		};
 		bag = this.#applySerializers(bag);
 		bag = this.#applyRedact(bag);
