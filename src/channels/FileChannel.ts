@@ -93,8 +93,14 @@ export class FileChannel implements LogChannel {
 
 	constructor(config: FileChannelConfig) {
 		this.#filePath = config.path;
-		this.#maxSize = config.maxSizeBytes ?? 10 * 1024 * 1024;
-		this.#maxFiles = config.maxFiles ?? 5;
+		// Checked here, not trusted: -1 rotated on every line and deleted the
+		// log, and NaN (an unset env var through Number()) never rotated at all.
+		this.#maxSize = positiveInteger(
+			"maxSizeBytes",
+			config.maxSizeBytes,
+			10 * 1024 * 1024,
+		);
+		this.#maxFiles = positiveInteger("maxFiles", config.maxFiles, 5);
 		this.#maxBuffer = positiveInteger(
 			"maxBufferBytes",
 			config.maxBufferBytes,
@@ -217,6 +223,11 @@ export class FileChannel implements LogChannel {
 		this.#fd = null;
 		if (fd !== null) await closeFd(fd).catch(() => undefined);
 		try {
+			if (this.#maxFiles === 1) {
+				// No generation is kept: the live file starts over.
+				await fsp.rm(this.#filePath, { force: true });
+				return;
+			}
 			const oldest = `${this.#filePath}.${this.#maxFiles - 1}`;
 			await fsp.rm(oldest, { force: true });
 			// Oldest first: .1 → .2, .2 → .3…
