@@ -35,8 +35,20 @@ export function clearLogger(): void {
 	instance = undefined;
 }
 
-const logger: Logger = new Proxy({} as Logger, {
+/** What the proxy stands on: nothing of its own, every read is trapped. */
+const target: Logger = Object.create(null);
+
+const logger: Logger = new Proxy(target, {
 	get(_target, prop) {
+		// A module loader inspects what it imports before anyone uses it: it reads
+		// `then` to decide whether the namespace is thenable, and various symbols
+		// for interop and formatting. Throwing on those turns a plain
+		// `import { setLogger } from '.../services/main'` into a crash at import
+		// time, far from any real use. They are not logger members, so answer
+		// undefined and let a genuine access be the one that reports.
+		if (typeof prop === "symbol" || prop === "then") {
+			return undefined;
+		}
 		if (!instance) {
 			throw new Error(
 				"[spectrum] Logger singleton accessed before SpectrumProvider.boot() ran. " +
