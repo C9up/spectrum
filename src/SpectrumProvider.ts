@@ -215,12 +215,16 @@ export default class SpectrumProvider {
 		return { ...cfg, level, channels };
 	}
 
-	/** Explicit channels, else the declared destination or targets, else a pretty console. */
+	/**
+	 * Explicit channels, else the declared destination or targets, else a pretty
+	 * console. An explicit `[]` is kept: it is how a logger is silenced, and the
+	 * Logger reads it the same way — only a missing `channels` takes a default.
+	 */
 	#channelsFor(
 		cfg: Partial<LogConfig>,
 		level: LogLevelWithSilent,
 	): LogChannel[] {
-		if (cfg.channels && cfg.channels.length > 0) return cfg.channels;
+		if (cfg.channels !== undefined) return cfg.channels;
 		return channelsFromConfig(cfg, level) ?? [new ConsoleChannel("pretty")];
 	}
 }

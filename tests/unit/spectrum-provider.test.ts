@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LogChannel, LogEntry } from "../../src/index.js";
 import { Logger } from "../../src/Logger.js";
 import SpectrumProvider from "../../src/SpectrumProvider.js";
@@ -118,6 +118,44 @@ describe("spectrum > SpectrumProvider", () => {
 		logger.info("hello");
 		// The configured channel received the entry — proof it's wired, not ignored.
 		expect(written.length).toBe(1);
+	});
+
+	it("keeps an explicit `channels: []` silent, as the Logger does", async () => {
+		// Emptying a logger's channels is how it is silenced; the provider
+		// replaced the empty list with a pretty console and printed every line.
+		const written: string[] = [];
+		const stdout = vi
+			.spyOn(process.stdout, "write")
+			.mockImplementation((chunk: string | Uint8Array) => {
+				written.push(String(chunk));
+				return true;
+			});
+		const stderr = vi
+			.spyOn(process.stderr, "write")
+			.mockImplementation((chunk: string | Uint8Array) => {
+				written.push(String(chunk));
+				return true;
+			});
+		try {
+			for (const config of [
+				{ level: "info", channels: [] },
+				{ default: "app", loggers: { app: { level: "info", channels: [] } } },
+			]) {
+				const app = makeApp(config);
+				new SpectrumProvider(app).register();
+				(await resolveLogger(app)).info("must not be printed anywhere");
+			}
+			expect(written.join("")).not.toContain("must not be printed");
+
+			// Without a `channels` key the default console still applies.
+			const app = makeApp({ level: "info" });
+			new SpectrumProvider(app).register();
+			(await resolveLogger(app)).info("printed by the default console");
+			expect(written.join("")).toContain("printed by the default console");
+		} finally {
+			stdout.mockRestore();
+			stderr.mockRestore();
+		}
 	});
 
 	it("closes channels owning a resource on shutdown()", async () => {
