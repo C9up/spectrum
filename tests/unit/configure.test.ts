@@ -1,8 +1,9 @@
 import * as fs from "node:fs";
 import { readFileSync } from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { configure } from "../../src/configure.js";
 import type { Logger } from "../../src/Logger.js";
@@ -64,25 +65,30 @@ class Capture implements LogChannel {
 const scratch: string[] = [];
 
 afterEach(() => {
-	for (const file of scratch.splice(0)) fs.rmSync(file, { force: true });
+	for (const dir of scratch.splice(0)) {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
 });
 
 /**
  * Load the generated config as a module.
  *
  * The package does not resolve its own name from inside itself, so the one
- * import in the stub is pointed at the source it names. Everything else is
- * executed exactly as it was written.
+ * import in the stub is pointed at the source it names, by absolute URL.
+ * Everything else is executed exactly as it was written. The module is written
+ * to a temporary directory: written beside the tests, a run that died before
+ * the cleanup left it in the tree for the next `tsc` and `vitest` to pick up.
  */
 async function loadGeneratedConfig(): Promise<unknown> {
 	const source = (await generatedConfig()).replace(
 		"'@c9up/spectrum'",
-		JSON.stringify(path.join(here, "../../src/index.ts")),
+		JSON.stringify(pathToFileURL(path.join(here, "../../src/index.ts")).href),
 	);
-	const file = path.join(here, `__generated-logger-${process.pid}.ts`);
-	scratch.push(file);
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "spectrum-configure-"));
+	scratch.push(dir);
+	const file = path.join(dir, "logger.ts");
 	fs.writeFileSync(file, source);
-	const module: { default?: unknown } = await import(file);
+	const module: { default?: unknown } = await import(pathToFileURL(file).href);
 	return module.default;
 }
 
