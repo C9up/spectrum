@@ -132,6 +132,46 @@ describe("spectrum > configure", () => {
 		expect(channel.entries).toHaveLength(1);
 		expect(channel.entries[0]?.name).toBe("app");
 	});
+
+	it("censors the credential headers a logged request carries", async () => {
+		// `stdSerializers.req` writes every header as it is; the session
+		// cookie and the bearer token are only kept out of the line by the
+		// config's `redact`.
+		const channel = new Capture();
+		const logger = await loggerFrom(await loadGeneratedConfig(), channel);
+		logger.info(
+			{
+				req: {
+					method: "GET",
+					url: "/",
+					headers: {
+						cookie: "session=abc; remember=xyz",
+						authorization: "Bearer secret",
+						accept: "text/html",
+					},
+				},
+				res: { headers: { "set-cookie": ["session=new"], "x-id": "1" } },
+			},
+			"request",
+		);
+		const res = channel.entries[0]?.res;
+		expect(
+			typeof res === "object" && res !== null
+				? Reflect.get(res, "headers")
+				: undefined,
+		).toEqual({ "set-cookie": "[Redacted]", "x-id": "1" });
+
+		const req = channel.entries[0]?.req;
+		const headers =
+			typeof req === "object" && req !== null
+				? Reflect.get(req, "headers")
+				: undefined;
+		expect(headers).toEqual({
+			cookie: "[Redacted]",
+			authorization: "[Redacted]",
+			accept: "text/html",
+		});
+	});
 });
 
 /**

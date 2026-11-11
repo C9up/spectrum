@@ -66,8 +66,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * An HTTP request as upstream's `req` serializer writes it: id, method, url,
- * query, params, headers and the remote address. Headers are written as they
- * are — censoring `authorization` or a cookie is what `redact` is for.
+ * query, params, headers and the remote address. Every header is written as
+ * it is, `cookie` and `authorization` included — censoring them is what
+ * `redact` is for, and the generated config lists them.
  */
 export function serializeRequest(value: unknown): unknown {
 	if (!isRecord(value)) return value;

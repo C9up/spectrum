@@ -18,7 +18,14 @@ export default defineConfig({
       enabled: true,
       name: 'app',
       level: logLevel(process.env.LOG_LEVEL),
-      redact: { paths: ['*.password', 'req.headers.authorization'] },
+      redact: {
+        paths: [
+          '*.password',
+          'req.headers.authorization',
+          'req.headers.cookie',
+          'res.headers["set-cookie"]',
+        ],
+      },
       transport: {
         targets: targets()
           .pushIf(!inProduction, targets.pretty())
@@ -50,7 +57,9 @@ logger.child({ module: 'db', correlationId: 'abc-123' }).debug('Query executed')
   `censor` as a value or a function, and `remove`
 - `mixin`, `hooks.logMethod`, `errorKey`, `msgPrefix`, `depthLimit` / `edgeLimit`
 - Child loggers with scoped module/correlationId, and `child(bindings, { level, redact, serializers, msgPrefix })`
-- `stdSerializers` (`err`, `req`, `res`) and `stdTimeFunctions`
+- `stdSerializers` (`err`, `req`, `res`) and `stdTimeFunctions`. `req` and
+  `res` write every header unchanged, cookies and `authorization` included:
+  list the ones to censor in `redact`, as the example above does
 - Per-module level overrides
 - Pretty console: error/fatal → stderr, others → stdout
 

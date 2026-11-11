@@ -14,6 +14,16 @@ export default defineConfig({
       // LOG_LEVEL comes from outside the program, so it is checked rather than
       // asserted: unset reads as 'info', and a value that is no level throws.
       level: logLevel(process.env.LOG_LEVEL),
+      // A logged request or response carries every header as it came: the
+      // session cookie, the bearer token and the cookies set in reply are
+      // kept out of the line here.
+      redact: {
+        paths: [
+          'req.headers.authorization',
+          'req.headers.cookie',
+          'res.headers["set-cookie"]',
+        ],
+      },
       transport: {
         targets: targets()
           .pushIf(!inProduction, targets.pretty())
