@@ -205,7 +205,8 @@ export function jsonLine(entry: LogEntry): string {
 	// read as the line's own (JSON.parse keeps the last duplicate), so a
 	// merging object could forge them. They are written once, by the logger.
 	const levelKeys = new Set(Object.keys(levelPart));
-	const rest: Record<string, unknown> = {};
+	// Null prototype, so a merged `__proto__` key is written, not swallowed.
+	const rest: Record<string, unknown> = Object.create(null);
 	for (const [key, value] of Object.entries(fields)) {
 		if (levelKeys.has(key) || key === "time" || key === options.messageKey)
 			continue;

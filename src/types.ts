@@ -254,7 +254,9 @@ const RESERVED_ENTRY_KEYS = new Set<string>([
 
 /** Root-level merged fields (everything that is not a structural LogEntry key). */
 export function logEntryExtras(entry: LogEntry): Record<string, unknown> {
-	const extras: Record<string, unknown> = {};
+	// Null prototype: a merged key named `__proto__` is a field to write, and
+	// assigned on an ordinary object it set the prototype and vanished.
+	const extras: Record<string, unknown> = Object.create(null);
 	for (const key of Object.keys(entry)) {
 		if (!RESERVED_ENTRY_KEYS.has(key)) extras[key] = entry[key];
 	}

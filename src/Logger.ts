@@ -161,10 +161,27 @@ function redactAction(redact: LogConfig["redact"]): RedactAction {
 	};
 }
 
-const DEFAULT_SERIALIZERS: Record<string, LogSerializer> = {
-	err: serializeError,
-	error: serializeError,
-};
+/**
+ * The serializers a key is looked up in, on a null prototype as pino builds
+ * its own: every own key of a merging object (a request body, often) is read
+ * here, and on an ordinary object `valueOf`, `hasOwnProperty` or `__proto__`
+ * answered an `Object.prototype` member — called as a serializer, it threw
+ * out of the log call or rewrote the field.
+ */
+function serializerBag(
+	configured: Record<string, LogSerializer> | undefined,
+): Record<string, LogSerializer> {
+	const bag: Record<string, LogSerializer> = Object.create(null);
+	bag.err = serializeError;
+	bag.error = serializeError;
+	if (configured !== undefined) {
+		for (const key of Object.keys(configured)) {
+			const serializer = configured[key];
+			if (typeof serializer === "function") bag[key] = serializer;
+		}
+	}
+	return bag;
+}
 
 export class Logger {
 	#config: LogConfig;
@@ -503,14 +520,14 @@ export class Logger {
 	}
 
 	#applySerializers(bag: Record<string, unknown>): Record<string, unknown> {
-		const serializers = { ...DEFAULT_SERIALIZERS, ...this.#config.serializers };
+		const serializers = serializerBag(this.#config.serializers);
 		const errorKey = this.#config.errorKey ?? "err";
 		let out: Record<string, unknown> | null = null;
 		for (const key of Object.keys(bag)) {
 			// The error key takes the `err` serializer unless it has its own.
 			const serializer =
 				serializers[key] ?? (key === errorKey ? serializers.err : undefined);
-			if (serializer) {
+			if (serializer !== undefined) {
 				if (!out) out = { ...bag };
 				out[key] = serializer(bag[key]);
 			}
