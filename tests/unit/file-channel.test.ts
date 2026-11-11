@@ -95,13 +95,25 @@ describe("spectrum > FileChannel", () => {
 		expect(content).toContain('"line-3999"');
 	});
 
-	it("close() releases the stream so the file is no longer locked", async () => {
+	it("close() releases the descriptor it held on the file", async () => {
+		// POSIX has no mandatory locks, so opening the file a second time
+		// proves nothing; the process's descriptor table is what says whether
+		// the channel still holds it.
+		const openOnLog = (): number =>
+			fs.readdirSync("/proc/self/fd").filter((fd) => {
+				try {
+					return fs.readlinkSync(`/proc/self/fd/${fd}`) === logPath;
+				} catch {
+					return false;
+				}
+			}).length;
 		const ch = new FileChannel({ path: logPath });
 		ch.write(makeEntry());
-		ch.close();
-		await flush();
-		const second = fs.createWriteStream(logPath, { flags: "a" });
-		await new Promise<void>((resolve) => second.end(resolve));
+		await expect.poll(openOnLog).toBe(1);
+
+		await ch.close();
+
+		expect(openOnLog()).toBe(0);
 	});
 
 	it("close() is idempotent when called twice", async () => {
