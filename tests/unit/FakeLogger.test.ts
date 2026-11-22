@@ -52,6 +52,33 @@ describe("FakeLogger — LogChannel surface", () => {
 		expect(defined(logged[0]).data?.n).toBe(7);
 	});
 
+	it("copies sharing, cycles and functions when structuredClone refuses the entry", () => {
+		// A function makes structuredClone throw, so the entry is copied by
+		// hand: a value reached twice must survive both times, a cycle must
+		// stay a cycle, and the function must stay a function.
+		const log = new FakeLogger();
+		const shared = { id: 7 };
+		const looped: Record<string, unknown> = { name: "loop" };
+		looped.self = looped;
+		log.write(
+			makeEntry({ data: { cb: () => 1, a: shared, b: shared, looped } }),
+		);
+		const data = defined(log.getLogged()[0]).data;
+		expect(data?.a).toEqual({ id: 7 });
+		expect(data?.b).toEqual({ id: 7 });
+		// Still a copy, and still shared the way the original was.
+		expect(data?.a).not.toBe(shared);
+		expect(data?.b).toBe(data?.a);
+		const copiedLoop = data?.looped;
+		expect(copiedLoop).not.toBe(looped);
+		expect(
+			typeof copiedLoop === "object" && copiedLoop !== null
+				? Reflect.get(copiedLoop, "self")
+				: undefined,
+		).toBe(copiedLoop);
+		expect(typeof data?.cb).toBe("function");
+	});
+
 	it("reset clears the captured array", () => {
 		const log = new FakeLogger();
 		log.write(makeEntry());

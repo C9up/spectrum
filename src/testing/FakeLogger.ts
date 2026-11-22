@@ -113,21 +113,34 @@ function describeCaptured(captured: LogEntry[]): string {
 	return `Captured (${captured.length}):\n${lines.join("\n")}`;
 }
 
-/** `JSON.stringify` with circular-ref + function-field handling.
- *  Functions render as `<function>`, circular refs as `<circular>`,
- *  unstringifiable values as `<unstringifiable>` — so an assertion
- *  failure message never gets eaten by a JSON throw. */
+/**
+ * `JSON.stringify` for an assertion message: a function renders as
+ * `<function>`, a BigInt as `<digits>n`, a cycle as `<circular>`, and a value
+ * that still cannot be written as `<unstringifiable>` — so a failure message
+ * is never eaten by a JSON throw.
+ *
+ * Only a cycle is cut. `path` holds the objects from the root to the value
+ * being written, so a value reached through two keys is written under both, as
+ * `JSON.stringify` writes it; remembering every object seen dropped the second
+ * one. The same rule as `@c9up/ream`'s `src/utils/safeStringify.ts`, kept as a
+ * local copy because this message format differs from a response body's.
+ */
 function safeStringify(value: unknown): string {
-	const seen = new WeakSet<object>();
+	const path: object[] = [];
 	try {
-		return JSON.stringify(value, (_key, v: unknown) => {
-			if (typeof v === "function") return "<function>";
-			if (typeof v === "object" && v !== null) {
-				if (seen.has(v)) return "<circular>";
-				seen.add(v);
-			}
-			return v;
-		});
+		const out: string | undefined = JSON.stringify(
+			value,
+			function replace(this: unknown, _key: string, v: unknown) {
+				if (typeof v === "function") return "<function>";
+				if (typeof v === "bigint") return `${v}n`;
+				if (typeof v !== "object" || v === null) return v;
+				while (path.length > 0 && path[path.length - 1] !== this) path.pop();
+				if (path.includes(v)) return "<circular>";
+				path.push(v);
+				return v;
+			},
+		);
+		return out ?? "undefined";
 	} catch {
 		return "<unstringifiable>";
 	}
@@ -137,18 +150,57 @@ function deepClone(entry: LogEntry): LogEntry {
 	try {
 		return structuredClone(entry);
 	} catch {
-		// `data` can carry functions / class instances that structuredClone
-		// rejects (DataCloneError). For a test capture a perfect clone isn't
-		// needed — round-trip through safeStringify (functions → "<function>",
-		// circular → "<circular>") so the entry is still CAPTURED and assertable
-		// instead of thrown away (the throw propagated into Logger.log's swallow,
-		// dropping the entry and making assertLogged fail with "no entry").
-		try {
-			const parsed: unknown = JSON.parse(safeStringify(entry));
-			return isLogEntry(parsed) ? parsed : entry;
-		} catch {
-			return entry;
+		// `data` can carry a function, which structuredClone rejects
+		// (DataCloneError). The entry must still be CAPTURED and assertable —
+		// the throw used to propagate into Logger.log's swallow, dropping the
+		// entry and making assertLogged fail with "no entry". So it is copied
+		// by hand: plain objects and arrays anew, a value reached twice copied
+		// once and shared again, a cycle kept a cycle, a function kept as it is.
+		// The JSON round-trip this replaces turned functions into strings and
+		// dropped a value's second reference.
+		const copy = copyValue(entry, new Map());
+		return isLogEntry(copy) ? copy : entry;
+	}
+}
+
+/**
+ * A copy of `value` for a test capture. `copies` maps every object already
+ * copied to its copy, so sharing and cycles come out as they went in.
+ */
+function copyValue(value: unknown, copies: Map<object, unknown>): unknown {
+	if (typeof value !== "object" || value === null) return value;
+	if (copies.has(value)) return copies.get(value);
+	if (Array.isArray(value)) {
+		const out: unknown[] = [];
+		copies.set(value, out);
+		for (const item of value) out.push(copyValue(item, copies));
+		return out;
+	}
+	const proto: unknown = Object.getPrototypeOf(value);
+	if (proto === Object.prototype || proto === null) {
+		const out: Record<string, unknown> =
+			proto === null ? Object.create(null) : {};
+		copies.set(value, out);
+		for (const [key, item] of Object.entries(value)) {
+			// defineProperty, not assignment: an own `__proto__` key stays a key.
+			Object.defineProperty(out, key, {
+				value: copyValue(item, copies),
+				enumerable: true,
+				writable: true,
+				configurable: true,
+			});
 		}
+		return out;
+	}
+	// Anything else (a Date, a Map, a class instance) is cloned whole when
+	// structuredClone can, and kept as it is when it cannot.
+	try {
+		const out: unknown = structuredClone(value);
+		copies.set(value, out);
+		return out;
+	} catch {
+		copies.set(value, value);
+		return value;
 	}
 }
 
