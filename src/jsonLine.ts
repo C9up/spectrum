@@ -11,7 +11,7 @@
  */
 
 import { hostname } from "node:os";
-import { SpectrumError } from "./errors.js";
+import { E_SPECTRUM_INVALID_LINE_OPTIONS } from "./errors.js";
 import {
 	DEFAULT_STRINGIFY_LIMITS,
 	type StringifyLimits,
@@ -81,8 +81,8 @@ export function lineOptionsFor(entry: object): JsonLineOptions {
 	return entryOptions.get(entry) ?? DEFAULT_LINE_OPTIONS;
 }
 
-function invalid(detail: string): SpectrumError {
-	return new SpectrumError("E_SPECTRUM_INVALID_LINE_OPTIONS", detail);
+function invalid(detail: string): Error {
+	return new E_SPECTRUM_INVALID_LINE_OPTIONS([detail]);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

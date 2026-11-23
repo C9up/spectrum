@@ -247,6 +247,34 @@ describe("defineConfig + LoggerManager (gaps 1, 2)", () => {
 		expect(() =>
 			defineConfig({ default: "nope", loggers: { main: { channels: [] } } }),
 		).toThrow(/loggers\.nope/);
+		expect(() =>
+			defineConfig({ default: "nope", loggers: { main: { channels: [] } } }),
+		).toThrow(
+			expect.objectContaining({ code: "E_SPECTRUM_UNKNOWN_DEFAULT_LOGGER" }),
+		);
+	});
+
+	it("throws when the config names no default logger", () => {
+		expect(() =>
+			defineConfig({ default: "", loggers: { main: { channels: [] } } }),
+		).toThrow(
+			expect.objectContaining({ code: "E_SPECTRUM_MISSING_DEFAULT_LOGGER" }),
+		);
+	});
+
+	it("a manager refuses a default logger it does not declare, and an unknown name", () => {
+		expect(
+			() => new LoggerManager({ default: "nope", loggers: { main: {} } }),
+		).toThrow(
+			expect.objectContaining({ code: "E_SPECTRUM_UNKNOWN_DEFAULT_LOGGER" }),
+		);
+		const manager = new LoggerManager({
+			default: "app",
+			loggers: { app: { channels: [] } },
+		});
+		expect(() => manager.use("audit")).toThrow(
+			expect.objectContaining({ code: "E_SPECTRUM_UNKNOWN_LOGGER" }),
+		);
 	});
 
 	it("manager.use() returns cached per-name loggers and is itself a Logger", () => {

@@ -9,6 +9,7 @@
  * Populated by `SpectrumProvider.boot()`.
  */
 
+import { E_SPECTRUM_NOT_BOOTED } from "../errors.js";
 import type { Logger } from "../Logger.js";
 
 let instance: Logger | undefined;
@@ -50,10 +51,7 @@ const logger: Logger = new Proxy(target, {
 			return undefined;
 		}
 		if (!instance) {
-			throw new Error(
-				"[spectrum] Logger singleton accessed before SpectrumProvider.boot() ran. " +
-					"Check that `@c9up/spectrum/provider` is listed in your reamrc.ts providers.",
-			);
+			throw new E_SPECTRUM_NOT_BOOTED();
 		}
 		const value = Reflect.get(instance, prop, instance);
 		return typeof value === "function" ? value.bind(instance) : value;

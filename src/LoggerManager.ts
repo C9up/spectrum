@@ -5,6 +5,10 @@
  * loggers forever, and exposes `use()` / `create()`.
  */
 
+import {
+	E_SPECTRUM_UNKNOWN_DEFAULT_LOGGER,
+	E_SPECTRUM_UNKNOWN_LOGGER,
+} from "./errors.js";
 import { Logger } from "./Logger.js";
 import type { LogConfig, LoggerManagerConfig } from "./types.js";
 
@@ -17,9 +21,9 @@ export class LoggerManager extends Logger {
 		if (selected === undefined) {
 			// Naming a logger that is not in `loggers` used to build a manager
 			// around undefined and fail on the first line written.
-			throw new Error(
-				`[spectrum] config.logger names '${config.default}', which is not in \`loggers\`. Declared: ${Object.keys(config.loggers).join(", ") || "(none)"}.`,
-			);
+			throw new E_SPECTRUM_UNKNOWN_DEFAULT_LOGGER([
+				`config.logger names '${config.default}', which is not in \`loggers\`. Declared: ${Object.keys(config.loggers).join(", ") || "(none)"}.`,
+			]);
 		}
 		super(selected);
 		this.#config = config;
@@ -34,9 +38,10 @@ export class LoggerManager extends Logger {
 
 		const config = this.#config.loggers[key];
 		if (!config) {
-			throw new Error(
-				`[spectrum] Unknown logger "${key}". Registered: ${Object.keys(this.#config.loggers).join(", ")}`,
-			);
+			throw new E_SPECTRUM_UNKNOWN_LOGGER([
+				key,
+				Object.keys(this.#config.loggers).join(", "),
+			]);
 		}
 		const logger = this.createLogger(key, config);
 		this.#loggers.set(key, logger);

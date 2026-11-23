@@ -19,7 +19,7 @@ import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { promisify } from "node:util";
-import { SpectrumError } from "../errors.js";
+import { E_SPECTRUM_INVALID_FILE_OPTIONS } from "../errors.js";
 import { jsonLine } from "../jsonLine.js";
 import type { LogChannel, LogEntry } from "../types.js";
 
@@ -65,10 +65,9 @@ function positiveInteger(
 ): number {
 	if (value === undefined) return fallback;
 	if (!Number.isInteger(value) || value <= 0) {
-		throw new SpectrumError(
-			"E_SPECTRUM_INVALID_FILE_OPTIONS",
+		throw new E_SPECTRUM_INVALID_FILE_OPTIONS([
 			`FileChannel ${name} must be a positive integer, got ${String(value)}`,
-		);
+		]);
 	}
 	return value;
 }
@@ -107,16 +106,14 @@ export class FileChannel implements LogChannel {
 	constructor(config: FileChannelConfig) {
 		const { path: filePath, fd } = config;
 		if ((filePath === undefined) === (fd === undefined)) {
-			throw new SpectrumError(
-				"E_SPECTRUM_INVALID_FILE_OPTIONS",
+			throw new E_SPECTRUM_INVALID_FILE_OPTIONS([
 				"FileChannel needs exactly one of `path` and `fd`",
-			);
+			]);
 		}
 		if (fd !== undefined && !(Number.isInteger(fd) && fd >= 0)) {
-			throw new SpectrumError(
-				"E_SPECTRUM_INVALID_FILE_OPTIONS",
+			throw new E_SPECTRUM_INVALID_FILE_OPTIONS([
 				`FileChannel fd must be a non-negative integer, got ${String(fd)}`,
-			);
+			]);
 		}
 		this.#filePath = filePath ?? `fd ${String(fd)}`;
 		this.#fdGiven = fd !== undefined;

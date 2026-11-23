@@ -16,7 +16,11 @@
 
 import { ConsoleChannel } from "./channels/ConsoleChannel.js";
 import { FileChannel } from "./channels/FileChannel.js";
-import { SpectrumError } from "./errors.js";
+import {
+	E_SPECTRUM_INVALID_FILE_OPTIONS,
+	E_SPECTRUM_UNKNOWN_LEVEL,
+	E_SPECTRUM_UNSUPPORTED_TARGET,
+} from "./errors.js";
 import { jsonLine } from "./jsonLine.js";
 import type {
 	LineWritable,
@@ -162,10 +166,11 @@ function atLevel(channel: LogChannel, level: string | undefined): LogChannel {
 	if (!isLogLevelWithSilent(level)) {
 		// A level nobody can act on is a config error, and the failure mode of
 		// ignoring it is the destination receiving everything.
-		throw new SpectrumError(
-			"E_SPECTRUM_UNKNOWN_LEVEL",
-			`Unknown transport target level "${level}". Use one of: ${Object.keys(LOG_LEVEL_ORDER).join(", ")}, silent.`,
-		);
+		throw new E_SPECTRUM_UNKNOWN_LEVEL([
+			"Unknown transport target",
+			`"${level}"`,
+			`${Object.keys(LOG_LEVEL_ORDER).join(", ")}, silent`,
+		]);
 	}
 	const threshold = levelThreshold(level);
 	// `trace` admits everything the logger already let through.
@@ -187,10 +192,9 @@ function descriptorChannel(destination: unknown): LogChannel {
 		return new ConsoleChannel("json", { stream: "stderr" });
 	if (typeof destination === "number")
 		return new FileChannel({ fd: destination });
-	throw new SpectrumError(
-		"E_SPECTRUM_INVALID_FILE_OPTIONS",
+	throw new E_SPECTRUM_INVALID_FILE_OPTIONS([
 		`pino/file destination must be a path or a file descriptor, got ${typeof destination}`,
-	);
+	]);
 }
 
 /**
@@ -238,10 +242,9 @@ function channelForTarget(entry: TransportTargetOptions): LogChannel {
 			maxBufferBytes: optionalNumber(options, "maxBufferBytes"),
 		});
 	}
-	throw new SpectrumError(
-		"E_SPECTRUM_UNSUPPORTED_TARGET",
+	throw new E_SPECTRUM_UNSUPPORTED_TARGET([
 		`Transport target "${target}" is not supported: spectrum builds "pino-pretty" and "pino/file". Pass a LogChannel as the target to write anywhere else.`,
-	);
+	]);
 }
 
 function prettyChannel(destination: unknown): LogChannel {
@@ -250,10 +253,9 @@ function prettyChannel(destination: unknown): LogChannel {
 		return new ConsoleChannel("pretty", { stream: "stdout" });
 	if (destination === 2)
 		return new ConsoleChannel("pretty", { stream: "stderr" });
-	throw new SpectrumError(
-		"E_SPECTRUM_UNSUPPORTED_TARGET",
+	throw new E_SPECTRUM_UNSUPPORTED_TARGET([
 		`pino-pretty destination ${JSON.stringify(destination)} is not supported: use 1 or 2, or a pino/file target for a file.`,
-	);
+	]);
 }
 
 /** A number option, or undefined when absent; any other type is a config error. */
@@ -276,15 +278,10 @@ function optionalBoolean(
 	throw invalidOption(key, "boolean", value);
 }
 
-function invalidOption(
-	key: string,
-	type: string,
-	value: unknown,
-): SpectrumError {
-	return new SpectrumError(
-		"E_SPECTRUM_INVALID_FILE_OPTIONS",
+function invalidOption(key: string, type: string, value: unknown): Error {
+	return new E_SPECTRUM_INVALID_FILE_OPTIONS([
 		`pino/file option ${key} must be a ${type}, got ${typeof value}`,
-	);
+	]);
 }
 
 /** JSON lines to anything with a `write(line)` method. */
@@ -316,10 +313,9 @@ export function destinationChannel(destination: unknown): LogChannel {
 		return new FileChannel({ path: destination });
 	if (typeof destination === "number") return descriptorChannel(destination);
 	if (isLineWritable(destination)) return new WritableChannel(destination);
-	throw new SpectrumError(
-		"E_SPECTRUM_UNSUPPORTED_TARGET",
+	throw new E_SPECTRUM_UNSUPPORTED_TARGET([
 		"destination must be a path, a file descriptor or an object with a write(line) method",
-	);
+	]);
 }
 
 /**
@@ -339,10 +335,9 @@ export function channelsFromConfig(
 	if (transport === undefined) return undefined;
 	if ("target" in transport) return channelsFromTargets([transport], level);
 	if (Reflect.get(transport, "pipeline") !== undefined) {
-		throw new SpectrumError(
-			"E_SPECTRUM_UNSUPPORTED_TARGET",
+		throw new E_SPECTRUM_UNSUPPORTED_TARGET([
 			"transport.pipeline is not supported: declare targets, or pass channels",
-		);
+		]);
 	}
 	if (transport.targets === undefined || transport.targets.length === 0) {
 		return undefined;

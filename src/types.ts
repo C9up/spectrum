@@ -1,4 +1,4 @@
-import { SpectrumError } from "./errors.js";
+import { E_SPECTRUM_UNKNOWN_LEVEL } from "./errors.js";
 import type { LineFormatters, TimestampOption } from "./jsonLine.js";
 import type { TransportTargetOptions } from "./targets.js";
 /**
@@ -57,10 +57,11 @@ export function isLogLevelWithSilent(
  */
 export function assertLogLevel(value: unknown): LogLevelWithSilent {
 	if (isLogLevelWithSilent(value)) return value;
-	throw new SpectrumError(
-		"E_SPECTRUM_UNKNOWN_LEVEL",
-		`unknown level ${JSON.stringify(value) ?? String(value)}. Use one of: ${[...CONFIGURED_LEVELS].join(", ")}.`,
-	);
+	throw new E_SPECTRUM_UNKNOWN_LEVEL([
+		"unknown",
+		JSON.stringify(value) ?? String(value),
+		[...CONFIGURED_LEVELS].join(", "),
+	]);
 }
 
 /**

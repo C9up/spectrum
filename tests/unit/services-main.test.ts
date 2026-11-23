@@ -34,6 +34,9 @@ describe("spectrum > services/main before boot", () => {
 			/before SpectrumProvider\.boot\(\) ran/,
 		);
 		expect(() => logger.level).toThrow(/before SpectrumProvider\.boot/);
+		expect(() => logger.level).toThrow(
+			expect.objectContaining({ code: "E_SPECTRUM_NOT_BOOTED" }),
+		);
 	});
 
 	it("forwards to the bound logger once set", () => {

@@ -44,6 +44,9 @@ describe("spectrum > SpectrumProvider", () => {
 		});
 		const provider = new SpectrumProvider(app);
 		expect(() => provider.register()).toThrow(/Missing "loggers\.prod"/);
+		expect(() => provider.register()).toThrow(
+			expect.objectContaining({ code: "E_SPECTRUM_UNKNOWN_DEFAULT_LOGGER" }),
+		);
 	});
 
 	it("uses the configured log level when present and valid", async () => {

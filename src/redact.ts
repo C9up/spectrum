@@ -9,7 +9,7 @@
  * password is written out in full.
  */
 
-import { SpectrumError } from "./errors.js";
+import { E_SPECTRUM_INVALID_REDACT_PATH } from "./errors.js";
 
 /**
  * fast-redact's own tokenizer: a run of characters that is not `.`, `[` or
@@ -17,8 +17,8 @@ import { SpectrumError } from "./errors.js";
  */
 const PATH_TOKEN = /[^.[\]]+|\[(?:.)*?\]/g;
 
-function invalidPath(detail: string): SpectrumError {
-	return new SpectrumError("E_SPECTRUM_INVALID_REDACT_PATH", detail);
+function invalidPath(detail: string): Error {
+	return new E_SPECTRUM_INVALID_REDACT_PATH([detail]);
 }
 
 /**

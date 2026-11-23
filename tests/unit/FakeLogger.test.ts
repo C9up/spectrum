@@ -106,6 +106,9 @@ describe("FakeLogger — assertLogged", () => {
 		expect(() => log.assertLogged("error")).toThrow(
 			/no captured entry matches/,
 		);
+		expect(() => log.assertLogged("error")).toThrow(
+			expect.objectContaining({ code: "E_SPECTRUM_ASSERTION_FAILED" }),
+		);
 	});
 
 	it("containing narrows by message substring", () => {
@@ -124,6 +127,9 @@ describe("FakeLogger — assertLogged", () => {
 		log.write(makeEntry({ level: "info" }));
 		expect(() => log.assertLogged("info", { containing: "" })).toThrow(
 			/cannot be an empty string/,
+		);
+		expect(() => log.assertLogged("info", { containing: "" })).toThrow(
+			expect.objectContaining({ code: "E_SPECTRUM_INVALID_PREDICATE" }),
 		);
 	});
 
@@ -179,6 +185,9 @@ describe("FakeLogger — assertNotLogged", () => {
 		log.write(makeEntry({ level: "error" }));
 		expect(() => log.assertNotLogged("error")).toThrow(
 			/at least one captured entry matches/,
+		);
+		expect(() => log.assertNotLogged("error")).toThrow(
+			expect.objectContaining({ code: "E_SPECTRUM_ASSERTION_FAILED" }),
 		);
 	});
 });

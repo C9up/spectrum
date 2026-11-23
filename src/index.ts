@@ -13,7 +13,7 @@ export {
 export { FileChannel, type FileChannelConfig } from "./channels/FileChannel.js";
 export { defineConfig } from "./config.js";
 export { configure } from "./configure.js";
-export { SpectrumError } from "./errors.js";
+export * as errors from "./errors.js";
 export { clearLogListeners, type LogListener, onLog } from "./events.js";
 export type { LineFormatters, TimestampOption } from "./jsonLine.js";
 export { Logger, type LogLevel } from "./Logger.js";

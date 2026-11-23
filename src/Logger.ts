@@ -14,7 +14,10 @@
  */
 
 import { format } from "node:util";
-import { SpectrumError } from "./errors.js";
+import {
+	E_SPECTRUM_INVALID_STRINGIFY_LIMIT,
+	E_SPECTRUM_UNSUPPORTED_OPTION,
+} from "./errors.js";
 import { emitLog, hasLogListeners } from "./events.js";
 import {
 	attachLineOptions,
@@ -72,10 +75,7 @@ function stringifyLimits(config: LogConfig): StringifyLimits {
 		["edgeLimit", edgeLimit],
 	] as const) {
 		if (value !== undefined && !isStringifyLimit(value)) {
-			throw new SpectrumError(
-				"E_SPECTRUM_INVALID_STRINGIFY_LIMIT",
-				`${name} must be a positive integer, got ${String(value)}`,
-			);
+			throw new E_SPECTRUM_INVALID_STRINGIFY_LIMIT([name, String(value)]);
 		}
 	}
 	return {
@@ -121,10 +121,7 @@ function rejectUnsupportedOptions(config: LogConfig): void {
 	for (const option of UNSUPPORTED_OPTIONS) {
 		const value: unknown = Reflect.get(config, option);
 		if (value !== undefined) {
-			throw new SpectrumError(
-				"E_SPECTRUM_UNSUPPORTED_OPTION",
-				`the "${option}" logger option is not supported`,
-			);
+			throw new E_SPECTRUM_UNSUPPORTED_OPTION([option]);
 		}
 	}
 	const streamWrite: unknown =
@@ -132,10 +129,7 @@ function rejectUnsupportedOptions(config: LogConfig): void {
 			? undefined
 			: Reflect.get(config.hooks, "streamWrite");
 	if (streamWrite !== undefined) {
-		throw new SpectrumError(
-			"E_SPECTRUM_UNSUPPORTED_OPTION",
-			'the "hooks.streamWrite" logger option is not supported',
-		);
+		throw new E_SPECTRUM_UNSUPPORTED_OPTION(["hooks.streamWrite"]);
 	}
 }
 

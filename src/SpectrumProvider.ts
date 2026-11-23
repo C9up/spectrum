@@ -1,6 +1,9 @@
 import "./augmentations.js";
 import { ConsoleChannel } from "./channels/ConsoleChannel.js";
-import { SpectrumError } from "./errors.js";
+import {
+	E_SPECTRUM_LOGGER_NOT_BOUND,
+	E_SPECTRUM_UNKNOWN_DEFAULT_LOGGER,
+} from "./errors.js";
 import { onLog } from "./events.js";
 import { Logger } from "./Logger.js";
 import { LoggerManager } from "./LoggerManager.js";
@@ -96,10 +99,7 @@ export default class SpectrumProvider {
 	async boot() {
 		const logger = await this.app.container.resolve(Logger);
 		if (!(logger instanceof Logger)) {
-			throw new SpectrumError(
-				"E_SPECTRUM_LOGGER_NOT_BOUND",
-				"the container resolved something other than a Logger for the Logger token",
-			);
+			throw new E_SPECTRUM_LOGGER_NOT_BOUND();
 		}
 		this.#owned = logger;
 		setLogger(logger);
@@ -188,9 +188,9 @@ export default class SpectrumProvider {
 			// LoggerManager builds with `loggers[default] === undefined` and crashes
 			// with a cryptic TypeError on the first log. Mirrors defineConfig().
 			if (!loggers[raw.default]) {
-				throw new Error(
-					`[spectrum] Missing "loggers.${raw.default}". It is referenced by the "default" logger`,
-				);
+				throw new E_SPECTRUM_UNKNOWN_DEFAULT_LOGGER([
+					`Missing "loggers.${raw.default}". It is referenced by the "default" logger`,
+				]);
 			}
 			return { default: raw.default, loggers };
 		}

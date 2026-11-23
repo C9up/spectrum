@@ -1,3 +1,7 @@
+import {
+	E_SPECTRUM_MISSING_DEFAULT_LOGGER,
+	E_SPECTRUM_UNKNOWN_DEFAULT_LOGGER,
+} from "./errors.js";
 import type { LogConfig, LoggerManagerConfig } from "./types.js";
 
 /**
@@ -13,12 +17,12 @@ export function defineConfig(
 ): LoggerManagerConfig {
 	if ("loggers" in config) {
 		if (!config.default) {
-			throw new Error('[spectrum] Missing "default" property in logger config');
+			throw new E_SPECTRUM_MISSING_DEFAULT_LOGGER();
 		}
 		if (!config.loggers[config.default]) {
-			throw new Error(
-				`[spectrum] Missing "loggers.${config.default}". It is referenced by the "default" logger`,
-			);
+			throw new E_SPECTRUM_UNKNOWN_DEFAULT_LOGGER([
+				`Missing "loggers.${config.default}". It is referenced by the "default" logger`,
+			]);
 		}
 		return config;
 	}

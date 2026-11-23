@@ -8,6 +8,10 @@
  * `@c9up/spectrum/testing`.
  */
 
+import {
+	E_SPECTRUM_ASSERTION_FAILED,
+	E_SPECTRUM_INVALID_PREDICATE,
+} from "../errors.js";
 import type { LogChannel, LogEntry, LogLevel } from "../types.js";
 import { LOG_LEVEL_ORDER, logEntryExtras } from "../types.js";
 
@@ -45,17 +49,17 @@ export class FakeLogger implements LogChannel {
 	assertLogged(level: LogLevel, predicate?: FakeLoggerPredicateArg): void {
 		const match = makeMatcher(level, predicate);
 		if (this.#captured.some(match)) return;
-		throw new Error(
+		throw new E_SPECTRUM_ASSERTION_FAILED([
 			`logger.assertLogged('${level}'${describePredicate(predicate)}) failed — no captured entry matches.\n${describeCaptured(this.#captured)}`,
-		);
+		]);
 	}
 
 	assertNotLogged(level: LogLevel, predicate?: FakeLoggerPredicateArg): void {
 		const match = makeMatcher(level, predicate);
 		if (!this.#captured.some(match)) return;
-		throw new Error(
+		throw new E_SPECTRUM_ASSERTION_FAILED([
 			`logger.assertNotLogged('${level}'${describePredicate(predicate)}) failed — at least one captured entry matches.\n${describeCaptured(this.#captured)}`,
-		);
+		]);
 	}
 }
 
@@ -73,9 +77,7 @@ function makeMatcher(
 	// Array.some short-circuits on an empty array, so a check inside
 	// the matcher would silently pass when nothing was captured.
 	if (predicate.containing === "") {
-		throw new Error(
-			"FakeLogger: `containing` predicate cannot be an empty string — it would match every captured message.",
-		);
+		throw new E_SPECTRUM_INVALID_PREDICATE();
 	}
 	return (e) => {
 		if (e.level !== level) return false;
