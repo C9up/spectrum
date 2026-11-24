@@ -13,12 +13,12 @@
  * @implements FR54, FR55, FR56, FR58
  */
 
-import { format } from "node:util";
 import {
 	E_SPECTRUM_INVALID_STRINGIFY_LIMIT,
 	E_SPECTRUM_UNSUPPORTED_OPTION,
 } from "./errors.js";
 import { emitLog, hasLogListeners } from "./events.js";
+import { formatMessage } from "./format.js";
 import {
 	attachLineOptions,
 	type JsonLineOptions,
@@ -31,6 +31,7 @@ import {
 	DEFAULT_STRINGIFY_LIMITS,
 	isStringifyLimit,
 	type StringifyLimits,
+	stringifyValue,
 } from "./stringify.js";
 import { channelsFromConfig } from "./targets.js";
 import type {
@@ -49,9 +50,6 @@ import {
 } from "./types.js";
 
 export type { LogLevel };
-
-/** printf-style tokens understood by `util.format`. */
-const PRINTF_TOKEN = /%[sdifjoOc%]/;
 
 function isLogLevel(value: string): value is LogLevel {
 	return value in LOG_LEVEL_ORDER;
@@ -436,10 +434,14 @@ export class Logger {
 	 *
 	 * - `(object, message?, ...values)` → object merged at root (pino).
 	 * - `(error, message?, ...values)` → `{ err }` merged (pino err serializer).
-	 * - `(message, ...values)` → printf via `util.format` (pino).
-	 * - `(message, singleObject)` with no printf token → merged as structured
-	 *   fields. This is spectrum's message-first ergonomic (ream ContextLogger
-	 *   particularity) preserved on top of pino's message-first form.
+	 * - `(message, ...values)` → printf, with pino's formatter rules.
+	 * - `(message, singleObject)` → the object merged as structured fields,
+	 *   the message written as given; `(message, singleError)` → `{ err }`.
+	 *
+	 * NAMED DEVIATION — the last form is spectrum's own (ream's request logger
+	 * is `info(message, data)`), and it no longer looks at the message to
+	 * decide: a `%j` or `%c` that request data put into the message used to
+	 * turn the fields into clear text inside `msg`, or swallow them.
 	 */
 	#resolveArgs(
 		arg0: unknown,
@@ -466,14 +468,14 @@ export class Logger {
 		if (arg0 instanceof Error) {
 			const message =
 				typeof rest[0] === "string"
-					? format(rest[0], ...rest.slice(1))
+					? this.#format(rest[0], rest.slice(1))
 					: arg0.message;
 			return { message, mergingObject: { [errorKey]: arg0 }, given: true };
 		}
 		if (isMergeableObject(arg0)) {
 			if (typeof rest[0] === "string") {
 				return {
-					message: format(rest[0], ...rest.slice(1)),
+					message: this.#format(rest[0], rest.slice(1)),
 					mergingObject: arg0,
 					given: true,
 				};
@@ -487,15 +489,42 @@ export class Logger {
 		}
 
 		const template = typeof arg0 === "string" ? arg0 : String(arg0);
-		if (
-			rest.length === 1 &&
-			isMergeableObject(rest[0]) &&
-			!PRINTF_TOKEN.test(template)
-		) {
-			return { message: template, mergingObject: rest[0], given: true };
+		if (rest.length === 1) {
+			const only = rest[0];
+			if (only instanceof Error) {
+				return {
+					message: template,
+					mergingObject: { [errorKey]: only },
+					given: true,
+				};
+			}
+			if (isMergeableObject(only)) {
+				return { message: template, mergingObject: only, given: true };
+			}
 		}
-		const message = rest.length > 0 ? format(template, ...rest) : template;
-		return { message, given: true };
+		return { message: this.#format(template, rest), given: true };
+	}
+
+	/** printf interpolation; an object goes in serialised and redacted. */
+	#format(template: string, values: readonly unknown[]): string {
+		return formatMessage(template, values, (value) =>
+			this.#interpolated(value),
+		);
+	}
+
+	/**
+	 * An object a `%j`, `%o` or `%O` writes into the message: through the
+	 * serializers and the redaction paths, as a merging object goes. pino
+	 * redacts an interpolated object with the logger's full path list; a
+	 * value that skipped it would put the very field the config censors in
+	 * clear text, one key away from where the config looks for it.
+	 */
+	#interpolated(value: unknown): string {
+		let out: unknown = value;
+		if (value instanceof Error) out = serializeError(value);
+		else if (isMergeableObject(value)) out = this.#applySerializers(value);
+		out = this.#redactValue(out);
+		return stringifyValue(out, this.#lineOptions?.limits) ?? "undefined";
 	}
 
 	/** The merging object with the mixin's fields; the merging object wins by default. */
@@ -530,12 +559,16 @@ export class Logger {
 	}
 
 	#applyRedact(bag: Record<string, unknown>): Record<string, unknown> {
-		if (this.#redactPaths.length === 0) return bag;
-		let out: unknown = bag;
+		const out = this.#redactValue(bag);
+		return isMergeableObject(out) ? out : bag;
+	}
+
+	#redactValue(value: unknown): unknown {
+		let out = value;
 		for (const tokens of this.#redactPaths) {
 			out = redactPath(out, tokens, this.#redactAction);
 		}
-		return isMergeableObject(out) ? out : bag;
+		return out;
 	}
 
 	#write(

@@ -41,15 +41,15 @@ describe("logger > object-first / merging object (gap 4)", () => {
 		expect(e.role).toBe("admin");
 	});
 
-	it("interpolates printf tokens via util.format", () => {
+	it("interpolates printf tokens", () => {
 		logger.info("user %s did %d actions", "bob", 3);
 		expect(defined(channel.entries[0]).message).toBe("user bob did 3 actions");
 	});
 
-	it("interpolates %o object tokens instead of merging", () => {
+	it("merges a single trailing object even when the message holds a token", () => {
 		logger.info("payload %o", { a: 1 });
-		expect(defined(channel.entries[0]).message).toContain("a: 1");
-		expect(defined(channel.entries[0]).a).toBeUndefined();
+		expect(defined(channel.entries[0]).message).toBe("payload %o");
+		expect(defined(channel.entries[0]).a).toBe(1);
 	});
 
 	it("a bare Error becomes an `err` field serialized to type/message/stack", () => {

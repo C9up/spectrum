@@ -4,8 +4,10 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { Request, Response } from "@c9up/ream";
 import { afterEach, describe, expect, it } from "vitest";
 import { configure } from "../../src/configure.js";
+import { jsonLine } from "../../src/jsonLine.js";
 import type { Logger } from "../../src/Logger.js";
 import SpectrumProvider from "../../src/SpectrumProvider.js";
 import type { LogChannel, LogEntry } from "../../src/types.js";
@@ -139,6 +141,9 @@ describe("spectrum > configure", () => {
 		// config's `redact`.
 		const channel = new Capture();
 		const logger = await loggerFrom(await loadGeneratedConfig(), channel);
+		const response = new Response();
+		response.header("x-id", "1");
+		response.plainCookie("session", "new");
 		logger.info(
 			{
 				req: {
@@ -150,16 +155,15 @@ describe("spectrum > configure", () => {
 						accept: "text/html",
 					},
 				},
-				res: { headers: { "set-cookie": ["session=new"], "x-id": "1" } },
+				res: response,
 			},
 			"request",
 		);
 		const res = channel.entries[0]?.res;
-		expect(
-			typeof res === "object" && res !== null
-				? Reflect.get(res, "headers")
-				: undefined,
-		).toEqual({ "set-cookie": "[Redacted]", "x-id": "1" });
+		expect(res).toEqual({
+			statusCode: 200,
+			headers: { "set-cookie": "[Redacted]", "x-id": "1" },
+		});
 
 		const req = channel.entries[0]?.req;
 		const headers =
@@ -172,6 +176,61 @@ describe("spectrum > configure", () => {
 			accept: "text/html",
 		});
 	});
+});
+
+describe("spectrum > configure > the framework's request", () => {
+	function loginRequest(): Request {
+		const request = new Request(
+			{
+				method: "POST",
+				path: "/login",
+				query: "next=%2Fhome",
+				headers: {
+					authorization: "Bearer s3cr3t-api-token",
+					cookie: "ream-session=SESSIONID123",
+					"content-type": "application/json",
+					"x-request-id": "req-42",
+				},
+				body: JSON.stringify({
+					email: "alice@example.com",
+					password: "hunter2",
+				}),
+			},
+			{ id: "7" },
+		);
+		request.setInitialBody({ email: "alice@example.com", password: "hunter2" });
+		return request;
+	}
+
+	for (const form of ["message-first", "object-first"] as const) {
+		it(`writes ctx.request without its credentials or its body (${form})`, async () => {
+			const channel = new Capture();
+			const logger = await loggerFrom(await loadGeneratedConfig(), channel);
+			const req = loginRequest();
+			if (form === "message-first") logger.info("login attempt", { req });
+			else logger.info({ req }, "login attempt");
+
+			const line = jsonLine(defined(channel.entries[0]));
+			expect(line).not.toContain("s3cr3t-api-token");
+			expect(line).not.toContain("SESSIONID123");
+			expect(line).not.toContain("hunter2");
+			expect(line).not.toContain("alice@example.com");
+			expect(defined(channel.entries[0]).req).toEqual({
+				id: "req-42",
+				method: "POST",
+				url: "/login",
+				query: { next: "/home" },
+				params: { id: "7" },
+				headers: {
+					authorization: "[Redacted]",
+					cookie: "[Redacted]",
+					"content-type": "application/json",
+					"x-request-id": "req-42",
+				},
+				remoteAddress: req.ip(),
+			});
+		});
+	}
 });
 
 /**
@@ -201,4 +260,9 @@ async function loggerFrom(
 	const app = makeApp(withChannel);
 	new SpectrumProvider(app).register();
 	return resolveLogger(app);
+}
+
+function defined<T>(value: T | undefined): T {
+	if (value === undefined) throw new Error("expected a value");
+	return value;
 }

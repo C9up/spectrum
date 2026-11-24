@@ -1,7 +1,7 @@
 ---
 to: config/logger.ts
 ---
-import { defineConfig, logLevel, targets } from '@c9up/spectrum'
+import { defineConfig, logLevel, stdSerializers, targets } from '@c9up/spectrum'
 
 const inProduction = process.env.NODE_ENV === 'production'
 
@@ -14,9 +14,13 @@ export default defineConfig({
       // LOG_LEVEL comes from outside the program, so it is checked rather than
       // asserted: unset reads as 'info', and a value that is no level throws.
       level: logLevel(process.env.LOG_LEVEL),
-      // A logged request or response carries every header as it came: the
-      // session cookie, the bearer token and the cookies set in reply are
-      // kept out of the line here.
+      // A request or a response logged under `req` / `res` is written as its
+      // method, url, query, params, status and headers: never its body or its
+      // cookie map. Its headers come as they arrived: the session cookie, the
+      // bearer token and the cookies set in reply are kept out of the line by
+      // the paths below. Anything logged under another key is written as it
+      // is: censor it with a path of its own.
+      serializers: { req: stdSerializers.req, res: stdSerializers.res },
       redact: {
         paths: [
           'req.headers.authorization',

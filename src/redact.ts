@@ -117,16 +117,17 @@ export function redactPath(
 		return node;
 	}
 
-	const keys = selectKeys(node, segment);
+	const view = writtenView(node, trail[trail.length - 1] ?? "");
+	const keys = selectKeys(view, segment);
 	if (keys.length === 0) return node;
 
 	const isLast = depth === tokens.length - 1;
 	let copy: Record<string, unknown> | unknown[] | null = null;
 	for (const key of keys) {
-		const current = readKey(node, key);
+		const current = readKey(view, key);
 		const path = [...trail, key];
 		if (isLast && action.remove) {
-			copy ??= Array.isArray(node) ? [...node] : copyObject(node);
+			copy ??= Array.isArray(view) ? [...view] : copyObject(view);
 			removeKey(copy, key);
 			continue;
 		}
@@ -134,10 +135,34 @@ export function redactPath(
 			? action.censor(current, path)
 			: redactPath(current, tokens, action, depth + 1, path);
 		if (next === current) continue;
-		copy ??= Array.isArray(node) ? [...node] : copyObject(node);
+		copy ??= Array.isArray(view) ? [...view] : copyObject(view);
 		writeKey(copy, key, next);
 	}
 	return copy ?? node;
+}
+
+/**
+ * The object a node is written as: what its `toJSON()` returns when it has
+ * one, else the node itself.
+ *
+ * NAMED DEVIATION — upstream's redactor walks the raw object and the line
+ * calls `toJSON()` afterwards. On a class instance whose fields are methods
+ * (an HTTP request: `headers()`), a path such as `req.headers.authorization`
+ * named no own key, matched nothing, and `toJSON()` then wrote the header in
+ * clear. A path is written against the shape the line shows, so it is
+ * applied to that shape. When nothing matches, the node is passed through
+ * untouched.
+ */
+function writtenView(node: object, key: string): object {
+	if (Array.isArray(node)) return node;
+	try {
+		const toJSON: unknown = Reflect.get(node, "toJSON");
+		if (typeof toJSON !== "function") return node;
+		const view: unknown = Reflect.apply(toJSON, node, [key]);
+		return typeof view === "object" && view !== null ? view : node;
+	} catch {
+		return node;
+	}
 }
 
 function removeKey(

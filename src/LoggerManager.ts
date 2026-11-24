@@ -5,6 +5,7 @@
  * loggers forever, and exposes `use()` / `create()`.
  */
 
+import { declaredLogger } from "./config.js";
 import {
 	E_SPECTRUM_UNKNOWN_DEFAULT_LOGGER,
 	E_SPECTRUM_UNKNOWN_LOGGER,
@@ -17,7 +18,7 @@ export class LoggerManager extends Logger {
 	#loggers: Map<string, Logger> = new Map();
 
 	constructor(config: LoggerManagerConfig) {
-		const selected = config.loggers[config.default];
+		const selected = declaredLogger(config.loggers, config.default);
 		if (selected === undefined) {
 			// Naming a logger that is not in `loggers` used to build a manager
 			// around undefined and fail on the first line written.
@@ -36,8 +37,8 @@ export class LoggerManager extends Logger {
 		const cached = this.#loggers.get(key);
 		if (cached) return cached;
 
-		const config = this.#config.loggers[key];
-		if (!config) {
+		const config = declaredLogger(this.#config.loggers, key);
+		if (config === undefined) {
 			throw new E_SPECTRUM_UNKNOWN_LOGGER([
 				key,
 				Object.keys(this.#config.loggers).join(", "),
@@ -50,11 +51,11 @@ export class LoggerManager extends Logger {
 
 	/**
 	 * Build a named logger: the config's `name` defaults to the name it is
-	 * registered under. Not cached; `use()` caches what this returns.
+	 * registered under. Not cached; `use()` caches what this returns. The
+	 * config handed in is not written to: the name goes on a copy.
 	 */
 	createLogger(name: string, config: LogConfig): Logger {
-		if (!config.name) config.name = name;
-		return new Logger(config);
+		return new Logger(config.name ? config : { ...config, name });
 	}
 
 	/**

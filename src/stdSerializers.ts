@@ -1,6 +1,7 @@
 /**
  * The standard serializers, in the shapes upstream's `stdSerializers` write:
- * `err` for errors, `req` and `res` for Node's HTTP request and response.
+ * `err` for errors, `req` and `res` for an HTTP request and response — Node's,
+ * or the framework's, whose fields are methods.
  *
  *   new Logger({ serializers: { req: stdSerializers.req, res: stdSerializers.res } })
  */
@@ -65,13 +66,86 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * Call `target[name]()` when it is a method; `undefined` when it is not, or
+ * when it throws — a serializer must not take the line down with it.
+ */
+function callMethod(target: object, name: string): unknown {
+	const method: unknown = Reflect.get(target, name);
+	if (typeof method !== "function") return undefined;
+	try {
+		return Reflect.apply(method, target, []);
+	} catch {
+		return undefined;
+	}
+}
+
+/** A copy of a record with at least one key, else `undefined`. */
+function nonEmpty(value: unknown): Record<string, unknown> | undefined {
+	if (!isRecord(value) || Object.keys(value).length === 0) return undefined;
+	return { ...value };
+}
+
+/**
+ * A request whose fields are methods (`method()`, `url()`, `headers()`), as
+ * the framework's own request is. Recognised by its shape, so spectrum does
+ * not depend on the framework.
+ */
+function isMethodRequest(value: object): boolean {
+	return (
+		typeof Reflect.get(value, "method") === "function" &&
+		typeof Reflect.get(value, "url") === "function" &&
+		typeof Reflect.get(value, "headers") === "function"
+	);
+}
+
+/**
+ * The headers of a method request: from its `serializeSafe()` view when it
+ * offers one (credential headers already blanked by the request itself),
+ * else from `headers()`. A plain copy either way, so the redaction paths
+ * written against `req.headers.*` reach them.
+ */
+function methodRequestHeaders(value: object): Record<string, unknown> {
+	const safe = callMethod(value, "serializeSafe");
+	const safeHeaders = isRecord(safe) ? Reflect.get(safe, "headers") : undefined;
+	if (isRecord(safeHeaders)) return { ...safeHeaders };
+	const headers = callMethod(value, "headers");
+	return isRecord(headers) ? { ...headers } : {};
+}
+
+/**
+ * NAMED DEVIATION — upstream's `req` serializer knows only Node's
+ * `IncomingMessage`, whose fields are properties. On the framework's request
+ * they are methods: read as properties they were functions, JSON left them
+ * out, and the line said `"req":{}`. The same fields are written here by
+ * calling the methods. `url` is the path and the query string is written
+ * apart, parsed, so a redaction path can reach a token it carries
+ * (`req.query.token`) where it could not reach into a URL string. Never the
+ * body and never the cookie map: they are not part of the shape.
+ */
+function serializeMethodRequest(value: object): Record<string, unknown> {
+	const query = nonEmpty(callMethod(value, "qs"));
+	const params = nonEmpty(callMethod(value, "params"));
+	return {
+		id: callMethod(value, "id"),
+		method: callMethod(value, "method"),
+		url: callMethod(value, "url"),
+		...(query ? { query } : {}),
+		...(params ? { params } : {}),
+		headers: methodRequestHeaders(value),
+		remoteAddress: callMethod(value, "ip"),
+	};
+}
+
+/**
  * An HTTP request as upstream's `req` serializer writes it: id, method, url,
  * query, params, headers and the remote address. Every header is written as
  * it is, `cookie` and `authorization` included — censoring them is what
- * `redact` is for, and the generated config lists them.
+ * `redact` is for, and the generated config lists them. The framework's own
+ * request, whose fields are methods, is read through those methods.
  */
 export function serializeRequest(value: unknown): unknown {
 	if (!isRecord(value)) return value;
+	if (isMethodRequest(value)) return serializeMethodRequest(value);
 	const info = Reflect.get(value, "info");
 	const connection = isRecord(info) ? info : Reflect.get(value, "socket");
 	const id = Reflect.get(value, "id");
@@ -105,14 +179,23 @@ export function serializeRequest(value: unknown): unknown {
 	};
 }
 
-/** An HTTP response as upstream's `res` serializer writes it: status and headers. */
+/**
+ * An HTTP response as upstream's `res` serializer writes it: status and
+ * headers. The framework's response has no `statusCode` property: its
+ * `getStatus()` is read instead (it is set on the response before it is
+ * sent, so it is written whether or not the headers went out).
+ */
 export function serializeResponse(value: unknown): unknown {
 	if (!isRecord(value)) return value;
 	const getHeaders = Reflect.get(value, "getHeaders");
+	const getStatus = Reflect.get(value, "getStatus");
 	return {
-		statusCode: Reflect.get(value, "headersSent")
-			? Reflect.get(value, "statusCode")
-			: null,
+		statusCode:
+			typeof getStatus === "function"
+				? callMethod(value, "getStatus")
+				: Reflect.get(value, "headersSent")
+					? Reflect.get(value, "statusCode")
+					: null,
 		headers:
 			typeof getHeaders === "function"
 				? Reflect.apply(getHeaders, value, [])

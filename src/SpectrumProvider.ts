@@ -1,5 +1,6 @@
 import "./augmentations.js";
 import { ConsoleChannel } from "./channels/ConsoleChannel.js";
+import { declaredLogger } from "./config.js";
 import {
 	E_SPECTRUM_LOGGER_NOT_BOUND,
 	E_SPECTRUM_UNKNOWN_DEFAULT_LOGGER,
@@ -180,14 +181,16 @@ export default class SpectrumProvider {
 	 */
 	#normalize(raw: unknown): LoggerManagerConfig {
 		if (isManagerConfig(raw)) {
-			const loggers: Record<string, LogConfig> = {};
+			// On a null prototype: a logger declared as `__proto__` is an entry
+			// here, not the prototype of the map.
+			const loggers: Record<string, LogConfig> = Object.create(null);
 			for (const [name, cfg] of Object.entries(raw.loggers)) {
 				loggers[name] = this.#normalizeLogger(cfg);
 			}
 			// Fail loud at boot if `default` references a missing logger — else
 			// LoggerManager builds with `loggers[default] === undefined` and crashes
 			// with a cryptic TypeError on the first log. Mirrors defineConfig().
-			if (!loggers[raw.default]) {
+			if (declaredLogger(loggers, raw.default) === undefined) {
 				throw new E_SPECTRUM_UNKNOWN_DEFAULT_LOGGER([
 					`Missing "loggers.${raw.default}". It is referenced by the "default" logger`,
 				]);
